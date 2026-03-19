@@ -40,9 +40,8 @@ export async function generateSpeechElevenLabs(text: string): Promise<Buffer> {
     throw new Error('Falta la API Key de ElevenLabs para generar audio.');
   }
 
-  // Usamos una voz muy expresiva y humana ('Bella' de ElevenLabs). 
-  // Si deseas una voz masculina puedes cambiar este ID (por ejemplo, 'ErXwobaYiN019PkySvjV' para Antoni).
-  const voiceId = 'EXAVITQu4vr4xnSDxMaL'; 
+  // Usamos una voz estable. Si suena raro o como "borracho", suele ser por el 'style' en niveles altos.
+  const voiceId = '21m00Tcm4TlvDq8ikWAM'; // Rachel (estándar hiper clara en español usando V2)
 
   console.log('[Audio] Generando voz hiperrealista con ElevenLabs...');
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
@@ -53,12 +52,10 @@ export async function generateSpeechElevenLabs(text: string): Promise<Buffer> {
     },
     body: JSON.stringify({
       text: text,
-      model_id: 'eleven_multilingual_v2', // vital para español natural y perfecto
+      model_id: 'eleven_multilingual_v2',
       voice_settings: {
         stability: 0.5,
-        similarity_boost: 0.75,
-        style: 0.15,
-        use_speaker_boost: true
+        similarity_boost: 0.75
       }
     }),
   });

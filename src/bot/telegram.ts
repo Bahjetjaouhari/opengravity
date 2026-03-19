@@ -61,8 +61,9 @@ bot.on('message:voice', async (ctx) => {
     const transcript = await transcribeAudioUrl(fileUrl);
     await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🎙️ Me dijiste:\n"${transcript}"\n\n🤔 Analizando mi respuesta...`);
     
-    // 3. Procesar el texto transcrito con nuestro LLM Principal
-    const response = await processUserMessage(userId, transcript);
+    // 3. Procesar el texto transcrito con nuestro LLM Principal forzando Español
+    const contextTranscript = `(Nota de voz del usuario, responde SIEMPRE en perfecto Español): ${transcript}`;
+    const response = await processUserMessage(userId, contextTranscript);
     const finalResp = response || 'No detecté ninguna acción clara para decir al respecto.';
 
     // 4. Si tenemos ElevenLabs, respondemos siempre con Nota de Voz cuando nos hablan en audio
