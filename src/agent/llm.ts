@@ -43,7 +43,10 @@ export const chatCompletion = async (messages: any[]) => {
     
     if (openRouterClient) {
       console.log(`[LLM Fallback] Intentando con OpenRouter...`);
-      // Usaremos Gemma-3 porque Llama devuelve un "429 Rate Limit Reached" rápidamente en la red de pruebas gratuitas
+      // Gemma-3 no soporta tool_calls en OpenRouter gratuito. Los eliminamos para que funcione como Chat puro.
+      delete requestConfig.tools;
+      delete requestConfig.tool_choice;
+      
       requestConfig.model = 'google/gemma-3-27b-it:free';
       const response = await openRouterClient.chat.completions.create(requestConfig);
       console.log(`[LLM OpenRouter Response]`, JSON.stringify(response.choices[0].message));
