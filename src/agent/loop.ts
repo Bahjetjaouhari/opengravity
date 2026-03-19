@@ -85,7 +85,9 @@ export const processUserMessage = async (userId: number, text: string): Promise<
   };
 
   const prev = userLocks[userId] || Promise.resolve();
-  const current = prev.then(() => execute()).catch((err) => `Error interno: ${err.message}`);
+  const current = prev.then(() => execute()).catch((err) => {
+    throw new Error(`${err.message}`);
+  });
   userLocks[userId] = current;
   return current;
 };
