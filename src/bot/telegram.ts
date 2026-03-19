@@ -78,9 +78,10 @@ bot.on('message:voice', async (ctx) => {
       // Si de pronto el usuario quita la API Key, volvemos a enviar texto normal
       await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, finalResp);
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('[Error de Voz]', error);
-    await ctx.reply('Error analizando o respondiendo a la nota de voz. Por favor intenta enviando texto.');
+    const detail = error.message || error.toString();
+    await ctx.reply(`Error procesando la nota de voz. Detalle técnico: ${detail}\n\nPor favor intenta enviando texto por ahora.`);
   }
 });
 
