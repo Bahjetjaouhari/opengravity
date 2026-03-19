@@ -40,14 +40,14 @@ export const chatCompletion = async (messages: any[]) => {
     return response.choices[0].message;
   } catch (error: any) {
     console.error(`[LLM Groq Error] ${error.message}`);
-    
     if (openRouterClient) {
-      console.log(`[LLM Fallback] Intentando con OpenRouter...`);
-      // Gemma-3 no soporta tool_calls en OpenRouter gratuito. Los eliminamos para que funcione como Chat puro.
+      console.log(`[LLM Fallback] Intentando con OpenRouter balancer mágico...`);
+      // Eliminamos las dependencias avanzadas de herramientas para que CUALQUIER IA gratis funcione sin dar Error 404
       delete requestConfig.tools;
       delete requestConfig.tool_choice;
       
-      requestConfig.model = 'google/gemma-3-27b-it:free';
+      // Usamos el 'openrouter/free' que es un balanceador de carga automático
+      requestConfig.model = 'openrouter/free';
       const response = await openRouterClient.chat.completions.create(requestConfig);
       console.log(`[LLM OpenRouter Response]`, JSON.stringify(response.choices[0].message));
       return response.choices[0].message;
