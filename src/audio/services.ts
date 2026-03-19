@@ -1,37 +1,36 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
 import { env } from '../config/env.js';
 import { groqClient } from '../agent/llm.js';
 
-// Transcribe un archivo de audio descargado desde una URL de Telegram
+// Transcribe un archivo de audio descargado desde una URL de Telegram usando Deepgram
 export async function transcribeAudioUrl(fileUrl: string): Promise<string> {
   const response = await fetch(fileUrl);
   if (!response.ok) throw new Error(`Error descargando audio: ${response.statusText}`);
   
   const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
   
-  // Guardamos temporalmente en /tmp (accesible en Vercel Serverless) porque Groq/OpenAI 
-  // pide un ReadStream para subir el archivo.
-  const tempFilePath = path.join(os.tmpdir(), `voice_in_${Date.now()}.ogg`);
-  fs.writeFileSync(tempFilePath, buffer);
+  // Clave introducida de forma manual por orden expresa
+  const deepgramApiKey = process.env.DEEPGRAM_API_KEY || 'c970dc8a996021a26875b0819cd486a00b8d1d2d';
+
+  console.log('[Audio] Transcribiendo nota de voz con Deepgram...');
   
-  try {
-    console.log('[Audio] Transcribiendo nota de voz con Groq Whisper...');
-    const transcription = await groqClient.audio.transcriptions.create({
-      file: fs.createReadStream(tempFilePath),
-      model: 'whisper-large-v3-turbo',
-      language: 'es', // Forzamos español por defecto para evitar traducciones indeseadas por ruido
-    });
-    
-    return transcription.text;
-  } finally {
-    // Siempre borramos el archivo para no saturar la memoria de Vercel
-    if (fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
-    }
+  const dgResponse = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=es', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Token ${deepgramApiKey}`,
+      'Content-Type': 'audio/ogg' // Formato nativo de Telegram Voice Notes
+    },
+    body: Buffer.from(arrayBuffer)
+  });
+
+  if (!dgResponse.ok) {
+    const errorText = await dgResponse.text();
+    throw new Error(`Error en Deepgram: ${dgResponse.status} - ${errorText}`);
   }
+
+  const result = await dgResponse.json();
+  const transcript = result.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
+  
+  return transcript.trim();
 }
 
 // Genera un audio ultra realista usando ElevenLabs

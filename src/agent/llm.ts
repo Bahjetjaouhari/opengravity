@@ -44,7 +44,7 @@ export const chatCompletion = async (messages: any[]) => {
     if (openRouterClient) {
       console.log(`[LLM Fallback] Intentando con OpenRouter...`);
       // Evitamos 'openrouter/free' genérico porque a veces asigna modelos que rompen los tool_calls o devuelven strings vacíos
-      requestConfig.model = 'google/gemini-2.0-flash-lite-preview-02-05:free';
+      requestConfig.model = 'meta-llama/llama-3.3-70b-instruct:free';
       const response = await openRouterClient.chat.completions.create(requestConfig);
       console.log(`[LLM OpenRouter Response]`, JSON.stringify(response.choices[0].message));
       return response.choices[0].message;
