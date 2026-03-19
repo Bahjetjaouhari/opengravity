@@ -3,7 +3,7 @@ import { env } from '../config/env.js';
 import { getAvailableToolsDefinitions } from '../tools/index.js';
 
 // Cliente principal (Groq)
-const groqClient = new OpenAI({
+export const groqClient = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
   apiKey: env.GROQ_API_KEY,
 });
