@@ -1,0 +1,22 @@
+{
+  "name": "opengravity",
+  "version": "1.0.0",
+  "description": "Personal Local AI Agent for Telegram",
+  "main": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "firebase": "^12.10.0",
+    "grammy": "^1.28.0",
+    "openai": "^4.55.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
