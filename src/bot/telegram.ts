@@ -4,24 +4,9 @@ import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
 import { inventarioDB, Modalidad } from '../inventory/db.js';
 import { analizarFotoMercancia, generarTextoVenta } from '../inventory/vision.js';
+import { sessionsDB } from '../inventory/sessions.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
-
-// ── Estado temporal de sesiones de carga de fotos ─────────────────────────
-interface PhotoSession {
-  fileId: string;
-  fileUrl: string;
-  analisis?: { tipos: string[]; descripcion: string; confianza: string };
-  tiposManual?: string[];
-  proveedor?: string;
-  // Precio único si no se desglosaron: "$70"
-  precio?: string;
-  // Precios individuales: { gorra: "$20", franela: "$50" }
-  precios?: Record<string, string>;
-  precio_total?: string;
-  modalidad?: Modalidad;
-  esperandoCampo?: 'tipo' | 'proveedor' | 'precio' | 'modalidad' | 'confirmar';
-}
 
 // Limpia el texto del proveedor: "Es de Lubass" → "Lubass"
 function limpiarProveedor(texto: string): string {
@@ -82,7 +67,6 @@ function parsearPrecios(texto: string, tipos: string[]): {
   // Return lo que tenemos aunque sea parcial
   return { precios, precio_total: undefined };
 }
-const pendingPhotoSessions: Record<number, PhotoSession> = {};
 
 // ── Middleware de seguridad ────────────────────────────────────────────────
 bot.use(async (ctx, next) => {
@@ -250,77 +234,101 @@ bot.command('post', async ctx => {
 bot.on('message:text', async (ctx, next) => {
   const text = ctx.message.text.trim();
   const userId = ctx.from.id;
-  const session = pendingPhotoSessions[userId];
+
+  // ✅ Sesión en Firestore — persiste entre invocaciones serverless de Vercel
+  const session = await sessionsDB.get(userId);
 
   // ── Flujo de sesión pendiente de foto ────────────────────────────────────
   if (session) {
-    // Paso 0: Preguntar tipo manualmente si la IA no lo detectó
+    // ✅ Si mandan un comando mientras hay sesión activa, ignoramos el flujo
+    // y dejamos que grammy lo maneje — pero le recordamos la sesión pendiente
+    if (text.startsWith('/') && session.esperandoCampo !== undefined) {
+      const cmdsInventario = ['stats','tienda','inventario','propio','pedido','proveedores','tipos','post'];
+      const cmd = text.slice(1).split(' ')[0].toLowerCase();
+      if (cmdsInventario.includes(cmd)) {
+        // Ejecutar el comando normalmente pasando al siguiente handler
+        return next();
+      }
+      // Para el confirmar, si envían otro texto que no es sí/no mostramos ayuda
+    }
+
     if (session.esperandoCampo === 'tipo') {
-      session.tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
-      session.esperandoCampo = 'proveedor';
+      const tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
+      await sessionsDB.set(userId, { ...session, tiposManual, esperandoCampo: 'proveedor' });
       await ctx.reply('👤 ¿De qué proveedor es esta mercancía?');
       return;
     }
+
     if (session.esperandoCampo === 'proveedor') {
-      session.proveedor = limpiarProveedor(text);  // ✅ "Es de Lubass" → "Lubass"
-      session.esperandoCampo = 'precio';
-      await ctx.reply('💰 ¿Precio? (Escribe el precio o "sin precio")');
+      const proveedor = limpiarProveedor(text);
+      await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'precio' });
+      const tipos = session.analisis?.tipos?.length ? session.analisis.tipos : (session.tiposManual || []);
+      const hint = tipos.length > 1
+        ? `_(Ej: ${tipos.map((t,i) => `${t} ${20+i*30}$`).join(' ')}, o el conjunto en 70$)_\n\n`
+        : '';
+      await ctx.reply(`💰 ¿Precio?\n${hint}(Escribe el precio o _"sin precio"_)`, { parse_mode: 'Markdown' });
       return;
     }
+
     if (session.esperandoCampo === 'precio') {
       const tiposActivos = session.analisis?.tipos?.length
-        ? session.analisis.tipos
-        : (session.tiposManual || []);
+        ? session.analisis.tipos : (session.tiposManual || []);
 
+      let patchPrecio: { precio?: string; precios?: Record<string, string>; precio_total?: string };
       if (/sin precio/i.test(text)) {
-        session.precio = undefined;
-        session.precios = {};
-        session.precio_total = undefined;
+        patchPrecio = { precio: undefined, precios: {}, precio_total: undefined };
       } else {
         const parsed = parsearPrecios(text, tiposActivos);
-        session.precios = parsed.precios;
-        session.precio_total = parsed.precio_total;
-        session.precio = parsed.precio; // precio único si no se desglosaron
+        patchPrecio = { precios: parsed.precios, precio_total: parsed.precio_total, precio: parsed.precio };
       }
-      session.esperandoCampo = 'modalidad';
+      await sessionsDB.set(userId, { ...session, ...patchPrecio, esperandoCampo: 'modalidad' });
       await ctx.reply(
         '📦 ¿Esta mercancía es:\n\n1️⃣ *Propia* – La tienes físicamente en stock\n2️⃣ *Por pedido* – Es del catálogo del proveedor\n\nResponde *1* o *2*',
         { parse_mode: 'Markdown' }
       );
       return;
     }
+
     if (session.esperandoCampo === 'modalidad') {
-      session.modalidad = text.includes('1') || /propio|propia/i.test(text) ? 'propio' : 'pedido';
-      session.esperandoCampo = 'confirmar';
+      const modalidad: Modalidad = text.includes('1') || /propio|propia/i.test(text) ? 'propio' : 'pedido';
+      const updated = { ...session, modalidad, esperandoCampo: 'confirmar' as const };
+      await sessionsDB.set(userId, updated);
 
       const a = session.analisis;
       const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
-      const tiposTexto = tiposFinales.join(', ');
-
-      // Construir línea de precios del resumen
+      const precios = session.precios || {};
       let precioResumen = 'Sin precio';
-      if (session.precios && Object.keys(session.precios).length > 0) {
-        const desglose = Object.entries(session.precios).map(([t, p]) => `${t}: ${p}`).join(', ');
-        precioResumen = session.precio_total
-          ? `${session.precio_total} (${desglose})`
-          : desglose;
+      if (Object.keys(precios).length > 0) {
+        const desglose = Object.entries(precios).map(([t, p]) => `${t}: ${p}`).join(', ');
+        precioResumen = session.precio_total ? `${session.precio_total} (${desglose})` : desglose;
       } else if (session.precio) {
         precioResumen = session.precio;
       }
+
       await ctx.reply(
         `📋 *Resumen:*\n\n` +
-        `🏷️ Tipos: ${tiposTexto}\n` +
-        `📝 ${a?.descripcion || tiposTexto}\n` +
+        `🏷️ Tipos: ${tiposFinales.join(', ')}\n` +
+        `📝 ${a?.descripcion || tiposFinales.join(' + ')}\n` +
         `👤 Proveedor: ${session.proveedor}\n` +
         `💰 Precio: ${precioResumen}\n` +
-        `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
+        `📦 Modalidad: ${modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
         `¿Guardar? Responde *sí* o *no*`,
         { parse_mode: 'Markdown' }
       );
       return;
     }
+
     if (session.esperandoCampo === 'confirmar') {
-      if (/^s[ií]|yes|ok|claro|dale|afirm/i.test(text)) {
+      // ✅ Si envió un comando, NO cancelamos — le recordamos que tiene algo pendiente
+      if (text.startsWith('/')) {
+        await ctx.reply(
+          `⚠️ Tienes una foto pendiente de guardar.\nResponde *sí* para guardar o *no* para cancelar.`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+
+      if (/^s[ií]|yes|ok|claro|dale|afirm|listo|guarda/i.test(text)) {
         const a = session.analisis;
         const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
         await inventarioDB.agregar({
@@ -336,13 +344,19 @@ bot.on('message:text', async (ctx, next) => {
           modalidad: session.modalidad!,
           fecha_carga: new Date().toISOString()
         });
-        delete pendingPhotoSessions[userId];
+        await sessionsDB.delete(userId);
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
         const precioFinal = session.precio_total || session.precio || 'Sin precio';
-        await ctx.reply(`${emoji} *¡Guardado!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`, { parse_mode: 'Markdown' });
-      } else {
-        delete pendingPhotoSessions[userId];
+        await ctx.reply(
+          `${emoji} *¡Guardado!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`,
+          { parse_mode: 'Markdown' }
+        );
+      } else if (/^no|cancel|nope/i.test(text)) {
+        await sessionsDB.delete(userId);
         await ctx.reply('❌ Cancelado. Envía la foto de nuevo cuando quieras.');
+      } else {
+        // Respuesta ambigua — recordamos las opciones
+        await ctx.reply('Responde *sí* para guardar o *no* para cancelar.', { parse_mode: 'Markdown' });
       }
       return;
     }
@@ -389,11 +403,11 @@ bot.on('message:photo', async ctx => {
     const caption = ctx.message.caption?.trim() || '';
 
     // ── ¿El usuario envió la foto para eliminar? ─────────────────────────
-    if (/elimina|ya no (est[áa]|tengo|hay)|borr[ao]|agotad/i.test(caption)) {
+    if (/\b(vendido|vendida|elimina|eliminar|borrar|agotad[oa])\b/i.test(caption)) {
       const producto = await inventarioDB.obtenerPorFileId(fileId);
       if (!producto) return ctx.reply('⚠️ Esta foto no está en el inventario.');
       await inventarioDB.eliminar(producto.id!);
-      return ctx.reply(`✅ *${producto.tipos.join(' + ')}* (${producto.proveedor}) eliminado del inventario.`, { parse_mode: 'Markdown' });
+      return ctx.reply(`✅ *${producto.tipos.join(' + ')}* (${producto.proveedor}) marcado como VENDIDO y eliminado del inventario.`, { parse_mode: 'Markdown' });
     }
 
     const fileInfo = await ctx.api.getFile(fileId);
@@ -417,7 +431,7 @@ bot.on('message:photo', async ctx => {
 
     // Decidir desde qué campo arranca el flujo
     const visionDetecto = analisis?.tipos?.length;
-    let campoInicial: PhotoSession['esperandoCampo'];
+    let campoInicial: 'tipo'|'proveedor'|'precio'|'modalidad'|'confirmar';
     if (!visionDetecto && !proveedor) campoInicial = 'tipo';        // Preguntar tipo primero
     else if (!proveedor) campoInicial = 'proveedor';                // Hay tipo pero no proveedor
     else if (modalidadCaption === undefined) campoInicial = 'precio'; // Hay proveedor, falta precio
@@ -443,15 +457,15 @@ bot.on('message:photo', async ctx => {
       );
     }
 
-    // Iniciamos el flujo interactivo
-    pendingPhotoSessions[userId] = {
+    // Iniciamos el flujo interactivo guardando en Firestore
+    await sessionsDB.set(userId, {
       fileId,
       fileUrl,
       analisis: analisis || undefined,
       proveedor,
       precio,
       esperandoCampo: campoInicial
-    };
+    });
 
     await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
 
