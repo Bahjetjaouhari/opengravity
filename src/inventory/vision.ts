@@ -16,19 +16,21 @@ export interface AnalisisFoto {
 export async function analizarFotoMercancia(imageUrl: string): Promise<AnalisisFoto | null> {
   if (!env.OPENROUTER_API_KEY) return null;
 
-  // Intentamos con 2 modelos de visión. Si el primero se tarda o falla, usamos el segundo.
+  // Intentamos con modelos rápidos de visión. Si el primero se tarda o falla, usamos el segundo.
+  // Limitar el tiempo es CRÍTICO para evitar que Vercel cancele la función (y que Telegram reintente)
   const MODELS_TO_TRY = [
-    'nvidia/nemotron-nano-12b-v2-vl:free',
-    'mistralai/mistral-small-3.1-24b-instruct:free', // Mistral 3.1 también acepta imágenes
+    'google/gemini-2.0-flash-lite-preview-02-05:free', // Ultra rápido
+    'mistralai/mistral-small-3.1-24b-instruct:free',   // Buen respaldo
   ];
 
   for (const model of MODELS_TO_TRY) {
     try {
       console.log(`[Vision] Intentando con modelo: ${model}`);
 
-      // ✅ Timeout de 12 segundos para no dejar el usuario esperando
+      // ✅ Timeout de 4.5 segundos por modelo (Max 9s total)
+      // Vercel Hobby tiene límite de 10s por defecto; Telegram también reintenta rápido.
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 12000);
+      const timeout = setTimeout(() => controller.abort(), 4500);
 
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
