@@ -21,14 +21,17 @@ export type Modalidad = 'propio' | 'pedido';
 export interface Producto {
   id?: string;
   proveedor: string;
-  // ✅ Array de tipos para fotos mixtas: ["franela", "gorra"], ["zapato", "pantalon", "franela"]
   tipos: string[];
   nombre: string;
+  // Precio único (si es conjunto sin desglose): "$70"
   precio?: string;
+  // Precios individuales por tipo: { gorra: "$20", franela: "$50" }
+  precios?: Record<string, string>;
+  // Total calculado automáticamente si se pusieron precios individuales
+  precio_total?: string;
   foto_url: string;
   foto_file_id: string;
   disponible: boolean;
-  // ✅ 'propio' = stock físico tuyo | 'pedido' = catálogo del proveedor, por encargo
   modalidad: Modalidad;
   fecha_carga: string;
 }
@@ -38,6 +41,18 @@ const normalizarTipo = (t: string) => t.toLowerCase().trim()
   .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // elimina acentos
 
 export const inventarioDB = {
+
+  /**
+   * Helper: devuelve el precio más relevante para mostrar.
+   * Si hay precios individuales y se filtró por tipo, muestra el precio de ese tipo.
+   * Sino muestra precio_total o precio.
+   */
+  getPrecioParaTipo: (producto: Producto, tipo?: string): string => {
+    if (tipo && producto.precios?.[tipo.toLowerCase().trim()]) {
+      return producto.precios[tipo.toLowerCase().trim()];
+    }
+    return producto.precio_total || producto.precio || 'Sin precio';
+  },
 
   agregar: async (producto: Omit<Producto, 'id'>): Promise<string> => {
     const docRef = await addDoc(collection(db, 'inventario'), {

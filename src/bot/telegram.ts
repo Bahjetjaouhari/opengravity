@@ -12,19 +12,75 @@ interface PhotoSession {
   fileId: string;
   fileUrl: string;
   analisis?: { tipos: string[]; descripcion: string; confianza: string };
-  tiposManual?: string[];   // tipos ingresados manualmente si la IA no los detectó
+  tiposManual?: string[];
   proveedor?: string;
+  // Precio único si no se desglosaron: "$70"
   precio?: string;
+  // Precios individuales: { gorra: "$20", franela: "$50" }
+  precios?: Record<string, string>;
+  precio_total?: string;
   modalidad?: Modalidad;
   esperandoCampo?: 'tipo' | 'proveedor' | 'precio' | 'modalidad' | 'confirmar';
 }
 
-// Limpia el texto del proveedor: "Es de Lubass" → "Lubass", "Del proveedor Juan" → "Juan"
+// Limpia el texto del proveedor: "Es de Lubass" → "Lubass"
 function limpiarProveedor(texto: string): string {
   return texto
     .replace(/^(es de|es del|del proveedor|de|del|proveedor|es)\s+/i, '')
     .trim()
-    .replace(/\b\w/g, c => c.toUpperCase()); // Capitalizar primera letra de cada palabra
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Parsea el texto de precio y extrae precios individuales por tipo.
+ * Ejemplos:
+ *   "gorra 20$ franela 50$"  → { precios: {gorra:"$20", franela:"$50"}, total:"$70" }
+ *   "75$" o "conjunto 75$"   → { precios: {}, precio: "$75" }
+ *   "gorra $20"              → { precios: {gorra:"$20"}, total: "$20" }
+ */
+function parsearPrecios(texto: string, tipos: string[]): {
+  precios: Record<string, string>;
+  precio_total?: string;
+  precio?: string;  // precio único si no se desglosaron
+} {
+  const precios: Record<string, string> = {};
+
+  // Detectamos si el texto tiene precios por tipo
+  for (const tipo of tipos) {
+    // Busca "{tipo} {precio}" en cualquier orden con separadores
+    const regex = new RegExp(
+      `${tipo}[^\\d$]*([\\d,.]+\\s*\\$|\\$[\\d,.]+|[\\d,.]+)`,
+      'i'
+    );
+    const match = texto.match(regex);
+    if (match) {
+      let val = match[1].trim();
+      if (!val.includes('$')) val = '$' + val; // normalizar a formato $XX
+      precios[tipo.toLowerCase()] = val;
+    }
+  }
+
+  // Si encontramos precios individuales para todos los tipos, calculamos total
+  if (Object.keys(precios).length === tipos.length && tipos.length > 1) {
+    const total = Object.values(precios).reduce((sum, p) => {
+      const num = parseFloat(p.replace(/[$,]/g, ''));
+      return sum + (isNaN(num) ? 0 : num);
+    }, 0);
+    return { precios, precio_total: `$${total.toFixed(2).replace('.00', '')}` };
+  }
+
+  // Si solo hay un tipo o no se desglosaron, buscamos un precio general
+  if (Object.keys(precios).length === 0 || tipos.length === 1) {
+    const generalMatch = texto.match(/([\d,.]+\s*\$|\$[\d,.]+|[\d,.]+(?=\s|$))/);
+    if (generalMatch) {
+      let val = generalMatch[1].trim();
+      if (!val.includes('$')) val = '$' + val;
+      return { precios: {}, precio: val };
+    }
+  }
+
+  // Return lo que tenemos aunque sea parcial
+  return { precios, precio_total: undefined };
 }
 const pendingPhotoSessions: Record<number, PhotoSession> = {};
 
@@ -154,7 +210,20 @@ bot.on('message:text', async (ctx, next) => {
       return;
     }
     if (session.esperandoCampo === 'precio') {
-      session.precio = /sin precio/i.test(text) ? undefined : text;
+      const tiposActivos = session.analisis?.tipos?.length
+        ? session.analisis.tipos
+        : (session.tiposManual || []);
+
+      if (/sin precio/i.test(text)) {
+        session.precio = undefined;
+        session.precios = {};
+        session.precio_total = undefined;
+      } else {
+        const parsed = parsearPrecios(text, tiposActivos);
+        session.precios = parsed.precios;
+        session.precio_total = parsed.precio_total;
+        session.precio = parsed.precio; // precio único si no se desglosaron
+      }
       session.esperandoCampo = 'modalidad';
       await ctx.reply(
         '📦 ¿Esta mercancía es:\n\n1️⃣ *Propia* – La tienes físicamente en stock\n2️⃣ *Por pedido* – Es del catálogo del proveedor\n\nResponde *1* o *2*',
@@ -169,12 +238,23 @@ bot.on('message:text', async (ctx, next) => {
       const a = session.analisis;
       const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
       const tiposTexto = tiposFinales.join(', ');
+
+      // Construir línea de precios del resumen
+      let precioResumen = 'Sin precio';
+      if (session.precios && Object.keys(session.precios).length > 0) {
+        const desglose = Object.entries(session.precios).map(([t, p]) => `${t}: ${p}`).join(', ');
+        precioResumen = session.precio_total
+          ? `${session.precio_total} (${desglose})`
+          : desglose;
+      } else if (session.precio) {
+        precioResumen = session.precio;
+      }
       await ctx.reply(
         `📋 *Resumen:*\n\n` +
         `🏷️ Tipos: ${tiposTexto}\n` +
         `📝 ${a?.descripcion || tiposTexto}\n` +
         `👤 Proveedor: ${session.proveedor}\n` +
-        `💰 Precio: ${session.precio || 'Sin precio'}\n` +
+        `💰 Precio: ${precioResumen}\n` +
         `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
         `¿Guardar? Responde *sí* o *no*`,
         { parse_mode: 'Markdown' }
@@ -190,6 +270,8 @@ bot.on('message:text', async (ctx, next) => {
           tipos: tiposFinales,
           nombre: a?.descripcion || tiposFinales.join(' + '),
           precio: session.precio,
+          precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
+          precio_total: session.precio_total,
           foto_url: session.fileUrl,
           foto_file_id: session.fileId,
           disponible: true,
@@ -198,7 +280,8 @@ bot.on('message:text', async (ctx, next) => {
         });
         delete pendingPhotoSessions[userId];
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
-        await ctx.reply(`${emoji} *¡Guardado exitosamente!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${session.precio || 'Sin precio'}`, { parse_mode: 'Markdown' });
+        const precioFinal = session.precio_total || session.precio || 'Sin precio';
+        await ctx.reply(`${emoji} *¡Guardado!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`, { parse_mode: 'Markdown' });
       } else {
         delete pendingPhotoSessions[userId];
         await ctx.reply('❌ Cancelado. Envía la foto de nuevo cuando quieras.');
