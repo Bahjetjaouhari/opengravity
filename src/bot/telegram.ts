@@ -1,29 +1,29 @@
-import { Bot, InputFile, InputMediaPhoto } from 'grammy';
+import { Bot, InputFile } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
-import { inventarioDB } from '../inventory/db.js';
+import { inventarioDB, Modalidad } from '../inventory/db.js';
 import { analizarFotoMercancia, generarTextoVenta } from '../inventory/vision.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
-// ── Sessión temporal para el flujo de carga de inventario ──────────────────
-// Guardamos el estado de conversación pendiente de fotos
-const pendingPhotoSessions: Record<number, {
+// ── Estado temporal de sesiones de carga de fotos ─────────────────────────
+interface PhotoSession {
   fileId: string;
   fileUrl: string;
-  analisis?: { tipo: string; descripcion: string; confianza: string };
+  analisis?: { tipos: string[]; descripcion: string; confianza: string };
   proveedor?: string;
   precio?: string;
-  esperandoCampo?: 'proveedor' | 'precio' | 'confirmar';
-}> = {};
+  modalidad?: Modalidad;
+  esperandoCampo?: 'proveedor' | 'precio' | 'modalidad' | 'confirmar';
+}
+const pendingPhotoSessions: Record<number, PhotoSession> = {};
 
 // ── Middleware de seguridad ────────────────────────────────────────────────
 bot.use(async (ctx, next) => {
   if (ctx.from && env.TELEGRAM_ALLOWED_USER_IDS.includes(ctx.from.id)) {
     await next();
   } else if (ctx.from) {
-    console.log(`[Seguridad] Usuario bloqueado: ${ctx.from.id}`);
     await ctx.reply('No estás autorizado para hablar conmigo.');
   }
 });
@@ -31,173 +31,181 @@ bot.use(async (ctx, next) => {
 // ── /start ─────────────────────────────────────────────────────────────────
 bot.command('start', ctx => {
   ctx.reply(
-    `🤖 *Hola Bahjet, OpenGravity activo y listo.*\n\n` +
-    `📦 *Sistema de Inventario disponible:*\n` +
+    `🤖 *OpenGravity activo, Bahjet.*\n\n` +
+    `📦 *Inventario:*\n` +
     `• Envía una foto para guardar mercancía\n` +
-    `• /inventario – Ver todo el stock\n` +
-    `• /proveedores – Ver lista de proveedores\n` +
-    `• /tipos – Ver categorías disponibles\n` +
-    `• /franelas, /pantalones, /zapatos, etc. – Catálogo por tipo\n` +
-    `• /proveedor [nombre] – Ver mercancía de un proveedor\n` +
-    `• /post [tipo] – Generar publicación para WhatsApp/IG`,
+    `• /inventario – Todo el stock\n` +
+    `• /propio – Solo tu stock físico\n` +
+    `• /pedido – Solo catálogo por pedido\n` +
+    `• /proveedores – Lista de proveedores\n` +
+    `• /tipos – Categorías con stock\n` +
+    `• /franelas /gorras /zapatos /pantalones etc.\n` +
+    `• /proveedor [nombre] – Stock de un proveedor\n` +
+    `• /post – Generar publicación WhatsApp/IG\n\n` +
+    `💬 También puedes escribirme cualquier cosa para chatear.`,
     { parse_mode: 'Markdown' }
   );
 });
 
-// ── /inventario ─────────────────────────────────────────────────────────────
-bot.command('inventario', async ctx => {
-  const productos = await inventarioDB.obtener();
-  if (productos.length === 0) return ctx.reply('📭 No hay productos en el inventario todavía.');
-  await ctx.reply(`📦 *${productos.length} producto(s) en stock:*`, { parse_mode: 'Markdown' });
-
-  // Mandamos las fotos en grupos de 10 (limit de Telegram)
+// ── Helper: enviar catálogo de fotos ──────────────────────────────────────
+async function enviarCatalogo(ctx: any, productos: any[], titulo: string) {
+  if (productos.length === 0) {
+    return ctx.reply(`📭 ${titulo}: Sin productos disponibles.`);
+  }
+  await ctx.reply(`📦 *${titulo}* (${productos.length} fotos):`, { parse_mode: 'Markdown' });
   for (let i = 0; i < productos.length; i += 10) {
     const grupo = productos.slice(i, i + 10);
-    const media = grupo.map((p, idx) => ({
+    const media = grupo.map((p: any, idx: number) => ({
       type: 'photo' as const,
       media: p.foto_file_id,
-      ...(idx === 0 ? { caption: grupo.map(pr => `🏷️ ${pr.tipo} – ${pr.proveedor} – ${pr.precio || 'Sin precio'}`).join('\n') } : {})
+      ...(idx === 0 ? {
+        caption: grupo.map((pr: any) =>
+          `🏷️ ${pr.tipos.join(' + ')} | 👤 ${pr.proveedor} | 💰 ${pr.precio || 'Sin precio'} | ${pr.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`
+        ).join('\n')
+      } : {})
     }));
     await ctx.replyWithMediaGroup(media);
   }
+}
+
+// ── Comandos de Inventario ─────────────────────────────────────────────────
+bot.command('inventario', async ctx => {
+  const productos = await inventarioDB.obtener();
+  await enviarCatalogo(ctx, productos, 'Inventario completo');
 });
 
-// ── /proveedores ─────────────────────────────────────────────────────────────
+bot.command('propio', async ctx => {
+  const productos = await inventarioDB.obtener({ modalidad: 'propio' });
+  await enviarCatalogo(ctx, productos, 'Mi stock propio');
+});
+
+bot.command('pedido', async ctx => {
+  const productos = await inventarioDB.obtener({ modalidad: 'pedido' });
+  await enviarCatalogo(ctx, productos, 'Catálogo por pedido');
+});
+
 bot.command('proveedores', async ctx => {
   const proveedores = await inventarioDB.listarProveedores();
   if (proveedores.length === 0) return ctx.reply('📭 No hay proveedores registrados.');
-  await ctx.reply(`👥 *Proveedores con stock:*\n\n${proveedores.map(p => `• ${p}`).join('\n')}`, { parse_mode: 'Markdown' });
+  await ctx.reply(
+    `👥 *Proveedores disponibles:*\n\n${proveedores.map(p => `• ${p}`).join('\n')}\n\n_Usa /proveedor [nombre] para ver su catálogo_`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
-// ── /tipos ─────────────────────────────────────────────────────────────────
 bot.command('tipos', async ctx => {
   const tipos = await inventarioDB.listarTipos();
   if (tipos.length === 0) return ctx.reply('📭 No hay categorías registradas.');
-  await ctx.reply(`🗂️ *Tipos de mercancía disponibles:*\n\n${tipos.map(t => `• /${t.replace(/\s+/g, '_')}`).join('\n')}\n\n_Usa /[tipo] para ver el catálogo_`, { parse_mode: 'Markdown' });
+  await ctx.reply(
+    `🗂️ *Categorías disponibles:*\n\n${tipos.map(t => `• /${t.replace(/\s+/g, '_')}`).join('\n')}\n\n_Usa /[categoría] para ver el catálogo_`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
-// ── /proveedor [nombre] ─────────────────────────────────────────────────────
 bot.command('proveedor', async ctx => {
   const nombre = ctx.match?.trim();
-  if (!nombre) return ctx.reply('Usa el formato: /proveedor [nombre]\nEj: /proveedor Maria');
-
+  if (!nombre) return ctx.reply('Usa: /proveedor [nombre]\nEj: /proveedor Maria');
   const productos = await inventarioDB.obtener({ proveedor: nombre });
-  if (productos.length === 0) return ctx.reply(`📭 No hay stock del proveedor "${nombre}".`);
-
-  await ctx.reply(`📦 *${productos.length} producto(s) de ${nombre}:*`, { parse_mode: 'Markdown' });
-  for (let i = 0; i < productos.length; i += 10) {
-    const grupo = productos.slice(i, i + 10);
-    const media = grupo.map((p, idx) => ({
-      type: 'photo' as const,
-      media: p.foto_file_id,
-      ...(idx === 0 ? { caption: grupo.map(pr => `🏷️ ${pr.tipo} – ${pr.precio || 'Sin precio'}\n${pr.nombre}`).join('\n\n') } : {})
-    }));
-    await ctx.replyWithMediaGroup(media);
-  }
+  await enviarCatalogo(ctx, productos, `Mercancía de ${nombre}`);
 });
 
-// ── /post [tipo] – Genera texto de venta para un producto aleatorio ──────────
 bot.command('post', async ctx => {
-  const tipo = ctx.match?.trim();
+  const tipo = ctx.match?.trim() || undefined;
   const productos = tipo ? await inventarioDB.obtener({ tipo }) : await inventarioDB.obtener();
-  if (productos.length === 0) return ctx.reply('📭 No hay productos para generar el post.');
+  if (productos.length === 0) return ctx.reply('📭 No hay productos para el post.');
 
   const producto = productos[Math.floor(Math.random() * productos.length)];
   const texto = await generarTextoVenta(producto);
 
   await ctx.replyWithPhoto(producto.foto_file_id, {
-    caption: `✅ *Post generado para WhatsApp/IG:*\n\n${texto}\n\n_📋 Copia el texto y pégalo en tu estado_`,
+    caption: `✅ *Post para WhatsApp/IG:*\n\n${texto}\n\n_📋 Copia y pega en tu estado_`,
     parse_mode: 'Markdown'
   });
 });
 
-// ── Comandos dinámicos por tipo: /franelas, /pantalones, etc. ─────────────────
+// ── Mensajes de texto ──────────────────────────────────────────────────────
 bot.on('message:text', async (ctx, next) => {
-  const text = ctx.message.text.toLowerCase().trim();
-  const session = pendingPhotoSessions[ctx.from.id];
+  const text = ctx.message.text.trim();
+  const userId = ctx.from.id;
+  const session = pendingPhotoSessions[userId];
 
-  // ── Si hay una sesión de foto pendiente, manejamos la respuesta del usuario ──
+  // ── Flujo de sesión pendiente de foto ────────────────────────────────────
   if (session) {
     if (session.esperandoCampo === 'proveedor') {
-      session.proveedor = ctx.message.text.trim();
+      session.proveedor = text;
       session.esperandoCampo = 'precio';
-      await ctx.reply('💰 ¿Cuál es el precio? (Escribe el precio o "sin precio" para omitirlo)');
+      await ctx.reply('💰 ¿Precio? (Escribe el precio o "sin precio")');
       return;
     }
-
     if (session.esperandoCampo === 'precio') {
-      const precioBruto = ctx.message.text.trim();
-      session.precio = precioBruto.toLowerCase() === 'sin precio' ? undefined : precioBruto;
-      session.esperandoCampo = 'confirmar';
-
-      const analisis = session.analisis;
+      session.precio = /sin precio/i.test(text) ? undefined : text;
+      session.esperandoCampo = 'modalidad';
       await ctx.reply(
-        `📋 *Resumen del producto:*\n\n` +
-        `🏷️ Tipo: ${analisis?.tipo || 'Sin detectar'}\n` +
-        `📝 Descripción: ${analisis?.descripcion || 'N/A'}\n` +
-        `👤 Proveedor: ${session.proveedor}\n` +
-        `💰 Precio: ${session.precio || 'Sin precio'}\n\n` +
-        `¿Confirmo y guardo? Responde *sí* o *no*`,
+        '📦 ¿Esta mercancía es:\n\n1️⃣ *Propia* – La tienes físicamente en stock\n2️⃣ *Por pedido* – Es del catálogo del proveedor\n\nResponde *1* o *2*',
         { parse_mode: 'Markdown' }
       );
       return;
     }
+    if (session.esperandoCampo === 'modalidad') {
+      session.modalidad = text.includes('1') || /propio|propia/i.test(text) ? 'propio' : 'pedido';
+      session.esperandoCampo = 'confirmar';
 
+      const a = session.analisis;
+      const tiposTexto = a?.tipos?.join(', ') || 'Sin detectar';
+      await ctx.reply(
+        `📋 *Resumen:*\n\n` +
+        `🏷️ Tipos detectados: ${tiposTexto}\n` +
+        `📝 ${a?.descripcion || 'N/A'}\n` +
+        `👤 Proveedor: ${session.proveedor}\n` +
+        `💰 Precio: ${session.precio || 'Sin precio'}\n` +
+        `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
+        `¿Guardar? Responde *sí* o *no*`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
     if (session.esperandoCampo === 'confirmar') {
       if (/^s[ií]|yes|ok|claro|dale|afirm/i.test(text)) {
-        const analisis = session.analisis;
+        const a = session.analisis;
         await inventarioDB.agregar({
           proveedor: session.proveedor!,
-          tipo: analisis?.tipo || 'otro',
-          nombre: analisis?.descripcion || 'Producto sin clasificar',
+          tipos: a?.tipos || ['artículo'],
+          nombre: a?.descripcion || 'Producto',
           precio: session.precio,
           foto_url: session.fileUrl,
           foto_file_id: session.fileId,
           disponible: true,
+          modalidad: session.modalidad!,
           fecha_carga: new Date().toISOString()
         });
-        delete pendingPhotoSessions[ctx.from.id];
-        await ctx.reply('✅ *Producto guardado en el inventario exitosamente!* 🎉', { parse_mode: 'Markdown' });
+        delete pendingPhotoSessions[userId];
+        await ctx.reply('✅ *¡Guardado exitosamente!* 🎉', { parse_mode: 'Markdown' });
       } else {
-        delete pendingPhotoSessions[ctx.from.id];
-        await ctx.reply('❌ Guardado cancelado. Puedes enviar la foto de nuevo cuando quieras.');
+        delete pendingPhotoSessions[userId];
+        await ctx.reply('❌ Cancelado. Envía la foto de nuevo cuando quieras.');
       }
       return;
     }
   }
 
-  // ── Comandos de catálogo dinámico: /franelas, /pantalon, etc. ────────────────
-  if (text.startsWith('/') && !['start', 'inventario', 'proveedores', 'tipos', 'proveedor', 'post'].some(c => text === `/${c}` || text.startsWith(`/${c} `))) {
-    const tipoCmd = text.slice(1).replace(/_/g, ' ').trim();
-    const productos = await inventarioDB.obtener({ tipo: tipoCmd });
-    if (productos.length > 0) {
-      await ctx.reply(`🗂️ *Catálogo de ${tipoCmd}s (${productos.length} disponibles):*`, { parse_mode: 'Markdown' });
-      for (let i = 0; i < productos.length; i += 10) {
-        const grupo = productos.slice(i, i + 10);
-        const media = grupo.map((p, idx) => ({
-          type: 'photo' as const,
-          media: p.foto_file_id,
-          ...(idx === 0 ? { caption: grupo.map(pr => `👤 ${pr.proveedor} – 💰 ${pr.precio || 'Sin precio'}`).join('\n') } : {})
-        }));
-        await ctx.replyWithMediaGroup(media);
+  // ── Catálogos dinámicos por tipo: /franelas, /gorras, /zapatos, etc. ─────
+  if (text.startsWith('/')) {
+    const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post'];
+    const cmd = text.slice(1).split(' ')[0].replace(/_/g, ' ').trim();
+    
+    if (!knownCommands.includes(cmd)) {
+      const productos = await inventarioDB.obtener({ tipo: cmd });
+      if (productos.length > 0) {
+        await enviarCatalogo(ctx, productos, `Catálogo de ${cmd}s`);
+        return;
       }
-      return;
+      // Si no hay productos de ese tipo, dejamos caer al chat IA
     }
   }
 
-  // Detectar si el usuario dice que algo ya no está disponible (sin foto adjunta)
-  if (/no (est[áa]|hay|tengo)|agotad|vendid|elimina/i.test(text)) {
-    await ctx.reply('📸 Envíame la foto del producto que quieres marcar como no disponible y escríbeme "eliminar" junto a ella.');
-    return;
-  }
-
-  // ── Flujo normal de chat IA ───────────────────────────────────────────────
-  await next();
-}, async ctx => {
-  const userId = ctx.from.id;
+  // ── Chat IA normal ────────────────────────────────────────────────────────
   try {
-    const text = ctx.message.text;
-    const wantsVoice = /voz|audio|habla/i.test(text);
+    const wantsVoice = /\bvoz\b|háblame|audio|en voz/i.test(text);
     const response = await processUserMessage(userId, text);
     const finalResp = response || 'No tengo respuesta para eso.';
 
@@ -208,8 +216,7 @@ bot.on('message:text', async (ctx, next) => {
       await ctx.reply(finalResp);
     }
   } catch (error: any) {
-    console.error('[Error de Telegram]', error);
-    await ctx.reply(`Oops, ocurrió un error: ${error.message}`);
+    await ctx.reply(`Oops: ${error.message}`);
   }
 });
 
@@ -217,87 +224,83 @@ bot.on('message:text', async (ctx, next) => {
 bot.on('message:photo', async ctx => {
   const userId = ctx.from.id;
   try {
-    // La foto de mayor resolución siempre es la última del array
     const foto = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = foto.file_id;
     const caption = ctx.message.caption?.trim() || '';
 
-    // ── ¿El usuario dijo "eliminar" junto a la foto? ─────────────────────────
-    if (/elimina|ya no (est[áa]|tengo|hay)|borr[ao]/i.test(caption)) {
+    // ── ¿El usuario envió la foto para eliminar? ─────────────────────────
+    if (/elimina|ya no (est[áa]|tengo|hay)|borr[ao]|agotad/i.test(caption)) {
       const producto = await inventarioDB.obtenerPorFileId(fileId);
-      if (!producto) {
-        await ctx.reply('⚠️ No encontré este producto en el inventario. ¿Está guardado con otra foto?');
-        return;
-      }
+      if (!producto) return ctx.reply('⚠️ Esta foto no está en el inventario.');
       await inventarioDB.eliminar(producto.id!);
-      await ctx.reply(`✅ *${producto.nombre}* (${producto.proveedor}) eliminado del inventario.`, { parse_mode: 'Markdown' });
-      return;
+      return ctx.reply(`✅ *${producto.tipos.join(' + ')}* (${producto.proveedor}) eliminado del inventario.`, { parse_mode: 'Markdown' });
     }
 
-    // ── Obtenemos la URL pública de la foto ────────────────────────────────
     const fileInfo = await ctx.api.getFile(fileId);
     const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
 
-    // ── Analizamos la foto con IA de visión ────────────────────────────────
-    const processingMsg = await ctx.reply('📸 Analizando la foto con IA...');
+    const processingMsg = await ctx.reply('📸 Analizando la foto con IA de visión...');
     const analisis = await analizarFotoMercancia(fileUrl);
 
-    // ── Si el caption tiene info (proveedor/precio), la extraemos con IA ──
+    // ── Extraer proveedor y precio del caption si los incluyeron ─────────
     let proveedor: string | undefined;
     let precio: string | undefined;
+    let modalidadCaption: Modalidad | undefined;
 
     if (caption) {
-      // Intentamos extraer proveedor y precio del caption
       const precioMatch = caption.match(/\$[\d,.]+|[\d,.]+\s*(bs|bolivares|usd|\$)/i);
       precio = precioMatch ? precioMatch[0] : undefined;
-      
-      // El proveedor es el texto que no es precio
+      modalidadCaption = /pedido|pedirlo|encargo/i.test(caption) ? 'pedido' : /propio|disponible/i.test(caption) ? 'propio' : undefined;
       const textoSinPrecio = caption.replace(/\$[\d,.]+|[\d,.]+\s*(bs|bolivares|usd|\$)/gi, '').trim();
       proveedor = textoSinPrecio || undefined;
     }
 
-    // Si tenemos todos los datos, guardamos directamente
-    if (proveedor) {
+    // Si tenemos todos los datos, guardamos sin preguntar
+    if (proveedor && modalidadCaption !== undefined) {
       await inventarioDB.agregar({
         proveedor,
-        tipo: analisis?.tipo || 'otro',
+        tipos: analisis?.tipos || ['artículo'],
         nombre: analisis?.descripcion || 'Producto',
         precio,
         foto_url: fileUrl,
         foto_file_id: fileId,
         disponible: true,
+        modalidad: modalidadCaption,
         fecha_carga: new Date().toISOString()
       });
       await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
-      await ctx.reply(
-        `✅ *Producto guardado automáticamente:*\n\n` +
-        `🏷️ Tipo: ${analisis?.tipo || 'otro'}\n` +
-        `📝 ${analisis?.descripcion || 'Producto'}\n` +
-        `👤 Proveedor: ${proveedor}\n` +
-        `💰 Precio: ${precio || 'Sin precio'}`,
+      const tiposTexto = analisis?.tipos.join(' + ') || 'artículo';
+      return ctx.reply(
+        `✅ *Guardado automáticamente:*\n🏷️ ${tiposTexto} | 👤 ${proveedor} | 💰 ${precio || 'Sin precio'} | ${modalidadCaption === 'propio' ? '✅ Propio' : '📦 Pedido'}`,
         { parse_mode: 'Markdown' }
       );
-      return;
     }
 
-    // Si no hay datos suficientes, iniciamos el flujo de preguntas
+    // Iniciamos el flujo interactivo de preguntas
     pendingPhotoSessions[userId] = {
       fileId,
       fileUrl,
       analisis: analisis || undefined,
-      esperandoCampo: 'proveedor'
+      proveedor,
+      precio,
+      esperandoCampo: proveedor ? 'precio' : 'proveedor'
     };
 
     await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
 
-    const detectado = analisis
-      ? `🔍 Detecté: *${analisis.tipo}* – ${analisis.descripcion} (confianza: ${analisis.confianza})`
-      : '🔍 No pude identificar el tipo de artículo automáticamente.';
+    const tiposDetectados = analisis?.tipos?.length
+      ? analisis.tipos.join(' + ')
+      : 'No identificado';
 
-    await ctx.reply(
-      `${detectado}\n\n👤 ¿De qué proveedor es esta mercancía?`,
-      { parse_mode: 'Markdown' }
-    );
+    let mensajeDeteccion = analisis
+      ? `🔍 *Detecté:* ${tiposDetectados}\n📝 ${analisis.descripcion} _(confianza: ${analisis.confianza})_\n\n`
+      : '🔍 No pude identificar los artículos automáticamente.\n\n';
+
+    if (!proveedor) {
+      await ctx.reply(`${mensajeDeteccion}👤 ¿De qué proveedor es esta mercancía?`, { parse_mode: 'Markdown' });
+    } else {
+      await ctx.reply(`${mensajeDeteccion}💰 ¿Cuál es el precio?`, { parse_mode: 'Markdown' });
+    }
 
   } catch (error: any) {
     console.error('[Error Foto]', error);
@@ -316,11 +319,10 @@ bot.on('message:voice', async ctx => {
     const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 
     const transcript = await transcribeAudioUrl(fileUrl);
-    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🎙️ Me dijiste:\n"${transcript}"\n\n🤔 Analizando...`);
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🎙️ Me dijiste:\n"${transcript}"\n\n🤔 Procesando...`);
 
-    const contextTranscript = `(Nota de voz, responde SIEMPRE en perfecto Español): ${transcript}`;
-    const response = await processUserMessage(userId, contextTranscript);
-    const finalResp = response || 'No detecté ninguna acción.';
+    const response = await processUserMessage(userId, `(Nota de voz, responde en Español): ${transcript}`);
+    const finalResp = response || 'Sin respuesta.';
 
     if (env.ELEVENLABS_API_KEY) {
       await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🗣️ Generando respuesta de voz...`);
@@ -331,15 +333,11 @@ bot.on('message:voice', async ctx => {
       await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, finalResp);
     }
   } catch (error: any) {
-    console.error('[Error de Voz]', error);
     await ctx.reply(`Error en nota de voz: ${error.message}`);
   }
 });
 
-// ── Error global ──────────────────────────────────────────────────────────────
-bot.catch(err => {
-  console.error(`[Grammy Error Global]`, err);
-});
+bot.catch(err => console.error(`[Grammy Error]`, err));
 
 export const startBot = async () => {
   console.log(`[Telegram] Iniciando bot con long-polling...`);

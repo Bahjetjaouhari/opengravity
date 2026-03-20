@@ -5,7 +5,6 @@ import {
 } from 'firebase/firestore';
 import { env } from '../config/env.js';
 
-// Reutilizamos la app de Firebase si ya existe
 const app = getApps().length ? getApps()[0] : initializeApp({
   apiKey: env.FIREBASE_API_KEY,
   authDomain: env.FIREBASE_AUTH_DOMAIN,
@@ -17,51 +16,78 @@ const app = getApps().length ? getApps()[0] : initializeApp({
 
 const db = getFirestore(app);
 
+export type Modalidad = 'propio' | 'pedido';
+
 export interface Producto {
   id?: string;
-  proveedor: string;             // Nombre del proveedor
-  tipo: string;                  // Categoría: franelas, pantalones, zapatos, etc.
-  nombre: string;                // Descripción del producto
-  precio?: string;               // Precio en texto libre: "$15", "15.000 Bs", etc.
-  foto_url: string;              // URL pública de la foto en Telegram (file_id funciona localmente)
-  foto_file_id: string;          // file_id de Telegram para reenviar la foto sin descargarla
-  disponible: boolean;           // true = en stock, false = agotado
-  fecha_carga: string;           // ISO timestamp
+  proveedor: string;
+  // ✅ Array de tipos para fotos mixtas: ["franela", "gorra"], ["zapato", "pantalon", "franela"]
+  tipos: string[];
+  nombre: string;
+  precio?: string;
+  foto_url: string;
+  foto_file_id: string;
+  disponible: boolean;
+  // ✅ 'propio' = stock físico tuyo | 'pedido' = catálogo del proveedor, por encargo
+  modalidad: Modalidad;
+  fecha_carga: string;
 }
+
+// Normaliza el texto de un tipo para evitar duplicados por acentos/mayúsculas
+const normalizarTipo = (t: string) => t.toLowerCase().trim()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // elimina acentos
 
 export const inventarioDB = {
 
-  // Guarda un producto nuevo
   agregar: async (producto: Omit<Producto, 'id'>): Promise<string> => {
     const docRef = await addDoc(collection(db, 'inventario'), {
       ...producto,
+      tipos: producto.tipos.map(normalizarTipo),
       disponible: true,
       fecha_carga: new Date().toISOString()
     });
     return docRef.id;
   },
 
-  // Obtiene todos los productos disponibles (opcional: filtrar por campo)
-  obtener: async (filtros?: { proveedor?: string; tipo?: string }): Promise<Producto[]> => {
-    let q = query(collection(db, 'inventario'), where('disponible', '==', true));
+  /**
+   * Obtiene productos disponibles.
+   * - Si se filtra por tipo, devuelve CUALQUIER foto que contenga ese tipo (mixtas incluidas)
+   * - Si se filtra por proveedor, filtra por nombre exacto (parcial)
+   * - Si se filtra por modalidad, filtra por 'propio' o 'pedido'
+   */
+  obtener: async (filtros?: {
+    proveedor?: string;
+    tipo?: string;
+    modalidad?: Modalidad;
+  }): Promise<Producto[]> => {
+    const snapshot = await getDocs(
+      query(collection(db, 'inventario'), where('disponible', '==', true))
+    );
 
-    const snapshot = await getDocs(q);
     let productos: Producto[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Producto));
 
-    // Filtros en memoria para no requerir índices compuestos en Firebase
     if (filtros?.proveedor) {
-      const prov = filtros.proveedor.toLowerCase().trim();
-      productos = productos.filter(p => p.proveedor.toLowerCase().includes(prov));
+      const prov = normalizarTipo(filtros.proveedor);
+      productos = productos.filter(p =>
+        normalizarTipo(p.proveedor).includes(prov)
+      );
     }
+
     if (filtros?.tipo) {
-      const tipo = filtros.tipo.toLowerCase().trim();
-      productos = productos.filter(p => p.tipo.toLowerCase().includes(tipo));
+      const tipo = normalizarTipo(filtros.tipo);
+      // ✅ Una foto aparece en el catálogo de franelas SI tiene "franela" ENTRE sus tipos
+      productos = productos.filter(p =>
+        p.tipos.some(t => normalizarTipo(t).includes(tipo))
+      );
+    }
+
+    if (filtros?.modalidad) {
+      productos = productos.filter(p => p.modalidad === filtros.modalidad);
     }
 
     return productos;
   },
 
-  // Obtiene un producto por su file_id de Telegram (útil para identificar foto al borrar)
   obtenerPorFileId: async (fileId: string): Promise<Producto | null> => {
     const q = query(collection(db, 'inventario'), where('foto_file_id', '==', fileId));
     const snap = await getDocs(q);
@@ -70,28 +96,24 @@ export const inventarioDB = {
     return { id: d.id, ...d.data() } as Producto;
   },
 
-  // Marca un producto como no disponible (no lo elimina físicamente)
   eliminar: async (id: string): Promise<void> => {
     await updateDoc(doc(db, 'inventario', id), { disponible: false });
   },
 
-  // Lista todos los proveedores únicos con stock
   listarProveedores: async (): Promise<string[]> => {
     const productos = await inventarioDB.obtener();
-    const set = new Set(productos.map(p => p.proveedor));
-    return Array.from(set).sort();
+    return [...new Set(productos.map(p => p.proveedor))].sort();
   },
 
-  // Lista todas las categorías únicas con stock
+  // ✅ Lista TODOS los tipos únicos (expandiendo los arrays de cada producto)
   listarTipos: async (): Promise<string[]> => {
     const productos = await inventarioDB.obtener();
-    const set = new Set(productos.map(p => p.tipo));
-    return Array.from(set).sort();
+    const todosLosTipos = productos.flatMap(p => p.tipos);
+    return [...new Set(todosLosTipos)].sort();
   },
 
-  // Obtiene un producto aleatorio para el recordatorio diario
-  obtenerAleatorio: async (): Promise<Producto | null> => {
-    const productos = await inventarioDB.obtener();
+  obtenerAleatorio: async (filtros?: { modalidad?: Modalidad }): Promise<Producto | null> => {
+    const productos = await inventarioDB.obtener(filtros);
     if (productos.length === 0) return null;
     return productos[Math.floor(Math.random() * productos.length)];
   }
