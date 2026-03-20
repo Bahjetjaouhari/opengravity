@@ -46,8 +46,8 @@ export const chatCompletion = async (messages: any[]) => {
       delete requestConfig.tools;
       delete requestConfig.tool_choice;
       
-      // Usamos el 'openrouter/free' que es un balanceador de carga automático
-      requestConfig.model = 'openrouter/free';
+      // Elegimos un modelo GRATUITO pero MUY INTELIGENTE específicamente para no caer en el balanceador "openrouter/free" que a veces elige modelos tontos que hablan en inglés (alucinaciones).
+      requestConfig.model = 'google/gemma-3-27b-it:free';
       const response = await openRouterClient.chat.completions.create(requestConfig);
       console.log(`[LLM OpenRouter Response]`, JSON.stringify(response.choices[0].message));
       return response.choices[0].message;
