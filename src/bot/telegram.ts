@@ -2,7 +2,7 @@ import { Bot, InputFile } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
-import { inventarioDB, Modalidad } from '../inventory/db.js';
+import { inventarioDB, Modalidad, proveedoresDB } from '../inventory/db.js';
 import { analizarFotoMercancia, generarTextoVenta } from '../inventory/vision.js';
 import { sessionsDB } from '../inventory/sessions.js';
 
@@ -14,6 +14,14 @@ function limpiarProveedor(texto: string): string {
     .replace(/^(es de|es del|del proveedor|de|del|proveedor|es)\s+/i, '')
     .trim()
     .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+async function askPrecio(ctx: any, tiposA?: string[], tiposM?: string[]) {
+  const tipos = tiposA?.length ? tiposA : (tiposM || []);
+  const hint = tipos.length > 1
+    ? `_(Ej: ${tipos.map((t,i) => `${t} ${20+i*30}$`).join(' ')}, o el conjunto en 70$)_\n\n`
+    : '';
+  await ctx.reply(`💰 ¿Precio?\n${hint}(Escribe el precio o _"sin precio"_)`, { parse_mode: 'Markdown' });
 }
 
 /**
@@ -261,12 +269,35 @@ bot.on('message:text', async (ctx, next) => {
 
     if (session.esperandoCampo === 'proveedor') {
       const proveedor = limpiarProveedor(text);
-      await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'precio' });
-      const tipos = session.analisis?.tipos?.length ? session.analisis.tipos : (session.tiposManual || []);
-      const hint = tipos.length > 1
-        ? `_(Ej: ${tipos.map((t,i) => `${t} ${20+i*30}$`).join(' ')}, o el conjunto en 70$)_\n\n`
-        : '';
-      await ctx.reply(`💰 ¿Precio?\n${hint}(Escribe el precio o _"sin precio"_)`, { parse_mode: 'Markdown' });
+      const existe = await proveedoresDB.obtenerPorNombre(proveedor);
+
+      if (!existe) {
+        await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'proveedor_nuevo_confirmar' });
+        await ctx.reply(`🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?\nResponde *sí* (pediré su contacto) o *no* (solo guardaré la foto).`, { parse_mode: 'Markdown' });
+      } else {
+        await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'precio' });
+        await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      }
+      return;
+    }
+
+    if (session.esperandoCampo === 'proveedor_nuevo_confirmar') {
+      if (/^s[ií]|yes|claro|dale|afirm/i.test(text)) {
+        await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
+        await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n_(Ej: "WhatsApp +58..." o "@su_instagram")_:`, { parse_mode: 'Markdown' });
+      } else {
+        // "No" registrarlo formalmente. Seguimos con el precio
+        await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
+        await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      }
+      return;
+    }
+
+    if (session.esperandoCampo === 'proveedor_contacto') {
+      await proveedoresDB.agregar({ nombre: session.proveedor!, contacto: text });
+      await ctx.reply(`✅ Proveedor *${session.proveedor}* registrado exitosamente.`, { parse_mode: 'Markdown' });
+      await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
+      await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
       return;
     }
 
@@ -431,14 +462,25 @@ bot.on('message:photo', async ctx => {
 
     // Decidir desde qué campo arranca el flujo
     const visionDetecto = analisis?.tipos?.length;
-    let campoInicial: 'tipo'|'proveedor'|'precio'|'modalidad'|'confirmar';
+    let campoInicial: 'tipo'|'proveedor'|'proveedor_nuevo_confirmar'|'precio'|'modalidad'|'confirmar';
+    let esNuevoProveedor = false;
+
     if (!visionDetecto && !proveedor) campoInicial = 'tipo';        // Preguntar tipo primero
     else if (!proveedor) campoInicial = 'proveedor';                // Hay tipo pero no proveedor
-    else if (modalidadCaption === undefined) campoInicial = 'precio'; // Hay proveedor, falta precio
-    else campoInicial = 'confirmar';
+    else {
+      const existeProv = await proveedoresDB.obtenerPorNombre(proveedor);
+      if (!existeProv) {
+        esNuevoProveedor = true;
+        campoInicial = 'proveedor_nuevo_confirmar';
+      } else if (modalidadCaption === undefined) {
+        campoInicial = 'precio';
+      } else {
+        campoInicial = 'confirmar';
+      }
+    }
 
     // Si tenemos todos los datos incluyendo modalidad, guardamos directamente
-    if (proveedor && modalidadCaption !== undefined && visionDetecto) {
+    if (!esNuevoProveedor && proveedor && modalidadCaption !== undefined && visionDetecto) {
       await inventarioDB.agregar({
         proveedor,
         tipos: analisis!.tipos,
@@ -464,7 +506,10 @@ bot.on('message:photo', async ctx => {
       analisis: analisis || undefined,
       proveedor,
       precio,
-      esperandoCampo: campoInicial
+      esperandoCampo: await (async () => {
+        // Fix TS narrow matching
+        return campoInicial as any;
+      })()
     });
 
     await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
@@ -482,8 +527,13 @@ bot.on('message:photo', async ctx => {
         `🔍 *Detecté:* ${td}\n📝 ${analisis!.descripcion} _(confianza: ${analisis!.confianza})_\n\n👤 ¿De qué proveedor es?`,
         { parse_mode: 'Markdown' }
       );
+    } else if (campoInicial === 'proveedor_nuevo_confirmar') {
+      await ctx.reply(
+        `🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?\nResponde *sí* o *no*`, 
+        { parse_mode: 'Markdown' }
+      );
     } else {
-      await ctx.reply(`💰 ¿Precio?`);
+      await askPrecio(ctx, analisis?.tipos);
     }
 
   } catch (error: any) {

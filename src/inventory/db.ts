@@ -133,3 +133,30 @@ export const inventarioDB = {
     return productos[Math.floor(Math.random() * productos.length)];
   }
 };
+
+export interface Proveedor {
+  id?: string;
+  nombre: string;
+  contacto?: string; // WhatsApp, Instagram, Telegram, etc.
+}
+
+export const proveedoresDB = {
+  obtenerPorNombre: async (nombre: string): Promise<Proveedor | null> => {
+    const norm = normalizarTipo(nombre);
+    const q = query(collection(db, 'proveedores'), where('nombre_normalizado', '==', norm));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    return { id: snap.docs[0].id, ...snap.docs[0].data() } as Proveedor;
+  },
+
+  agregar: async (proveedor: Omit<Proveedor, 'id'>): Promise<string> => {
+    const norm = normalizarTipo(proveedor.nombre);
+    const docRef = await addDoc(collection(db, 'proveedores'), {
+      ...proveedor,
+      nombre_normalizado: norm,
+      fecha_registro: new Date().toISOString()
+    });
+    return docRef.id;
+  }
+};
+
