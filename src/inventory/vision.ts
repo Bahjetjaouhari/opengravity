@@ -16,69 +16,89 @@ export interface AnalisisFoto {
 export async function analizarFotoMercancia(imageUrl: string): Promise<AnalisisFoto | null> {
   if (!env.OPENROUTER_API_KEY) return null;
 
-  try {
-    console.log('[Vision] Analizando foto de mercancía con IA...');
+  // Intentamos con 2 modelos de visión. Si el primero se tarda o falla, usamos el segundo.
+  const MODELS_TO_TRY = [
+    'nvidia/nemotron-nano-12b-v2-vl:free',
+    'mistralai/mistral-small-3.1-24b-instruct:free', // Mistral 3.1 también acepta imágenes
+  ];
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://github.com/OpenGravity',
-        'X-Title': 'OpenGravity'
-      },
-      body: JSON.stringify({
-        model: VISION_MODEL,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: imageUrl } },
-              {
-                type: 'text',
-                text: `Eres un experto en inventario de ropa y mercancía. Analiza TODOS los tipos de artículos visibles en esta foto.
+  for (const model of MODELS_TO_TRY) {
+    try {
+      console.log(`[Vision] Intentando con modelo: ${model}`);
 
-Categorías posibles: franela, camiseta, camisa, pantalon, short, bermuda, vestido, falda, zapato, tenis, sandalia, gorra, gorra, bolso, cartera, correa, chaqueta, sueter, pijama, ropa interior, medias, accesorio, conjunto.
+      // ✅ Timeout de 12 segundos para no dejar el usuario esperando
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 12000);
 
-Responde SOLO con un JSON válido exactamente así:
-{"tipos": ["tipo1", "tipo2"], "descripcion": "descripción breve en español de 5-10 palabras", "confianza": "alta/media/baja"}
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://github.com/OpenGravity',
+          'X-Title': 'OpenGravity'
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'image_url', image_url: { url: imageUrl } },
+                {
+                  type: 'text',
+                  text: `Eres experto en inventario de ropa. Analiza TODOS los artículos visibles en la foto.
+Responde SOLO con JSON exactamente así (sin texto extra):
+{"tipos": ["gorra"], "descripcion": "gorra snapback blanca logo Made", "confianza": "alta"}
+Tipos posibles: franela, camisa, pantalon, short, vestido, zapato, tenis, sandalia, gorra, bolso, cartera, chaqueta, conjunto, accesorio, otro.`
+                }
+              ]
+            }
+          ],
+          max_tokens: 150,
+          temperature: 0.1
+        })
+      });
 
-Si hay varios artículos distintos, inclúyelos todos en el array "tipos".
-Solo JSON, sin texto adicional ni markdown.`
-              }
-            ]
-          }
-        ],
-        max_tokens: 200,
-        temperature: 0.1
-      })
-    });
+      clearTimeout(timeout);
 
-    if (!response.ok) {
-      console.error('[Vision] Error del modelo:', response.status);
-      return null;
+      if (!response.ok) {
+        console.error(`[Vision] ${model} respondió ${response.status}, intentando siguiente...`);
+        continue;
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.error(`[Vision] ${model} no devolvió JSON válido, intentando siguiente...`);
+        continue;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+      const tiposRaw = Array.isArray(parsed.tipos) ? parsed.tipos : [parsed.tipo || 'artículo'];
+
+      console.log(`[Vision] ✅ Éxito con ${model}: ${tiposRaw.join(', ')}`);
+      return {
+        tipos: tiposRaw.map((t: string) => t.toLowerCase().trim()),
+        descripcion: parsed.descripcion || 'Mercancía sin descripción',
+        confianza: parsed.confianza || 'media'
+      };
+
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.error(`[Vision] ${model} expiró por timeout, intentando siguiente...`);
+      } else {
+        console.error(`[Vision] Error con ${model}:`, err.message);
+      }
+      // Continuamos con el siguiente modelo
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    // Normalizamos: si devolvió string en vez de array, lo convertimos
-    const tiposRaw = Array.isArray(parsed.tipos) ? parsed.tipos : [parsed.tipo || 'artículo'];
-    
-    return {
-      tipos: tiposRaw.map((t: string) => t.toLowerCase().trim()),
-      descripcion: parsed.descripcion || 'Mercancía sin descripción',
-      confianza: parsed.confianza || 'baja'
-    };
-
-  } catch (err) {
-    console.error('[Vision] Error analizando foto:', err);
-    return null;
   }
+
+  // Ningún modelo funcionó, devolvemos null para pedir los datos manualmente
+  console.error('[Vision] Todos los modelos de visión fallaron. Pediremos datos manualmente.');
+  return null;
 }
 
 /**
