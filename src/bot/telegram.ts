@@ -1,4 +1,4 @@
-import { Bot, InputFile } from 'grammy';
+import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
@@ -273,7 +273,10 @@ bot.on('message:text', async (ctx, next) => {
 
       if (!existe) {
         await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'proveedor_nuevo_confirmar' });
-        await ctx.reply(`🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?\nResponde *sí* (pediré su contacto) o *no* (solo guardaré la foto).`, { parse_mode: 'Markdown' });
+        await ctx.reply(`🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?`, {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text("Sí, pedir contacto", "prov_si").text("No, continuar", "prov_no")
+        });
       } else {
         await sessionsDB.set(userId, { ...session, proveedor, esperandoCampo: 'precio' });
         await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
@@ -282,13 +285,15 @@ bot.on('message:text', async (ctx, next) => {
     }
 
     if (session.esperandoCampo === 'proveedor_nuevo_confirmar') {
+      // Ignoramos si escriben en vez de usar el botón, o podemos manejarlo
       if (/^s[ií]|yes|claro|dale|afirm/i.test(text)) {
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
         await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n_(Ej: número de WhatsApp o link de Instagram)_:`, { parse_mode: 'Markdown' });
-      } else {
-        // "No" registrarlo formalmente. Seguimos con el precio
+      } else if (/^no|cancel/i.test(text)) {
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
         await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      } else {
+        await ctx.reply('☝️ Por favor, usa los botones arriba o responde *sí* o *no*.', { parse_mode: 'Markdown' });
       }
       return;
     }
@@ -425,6 +430,33 @@ bot.on('message:text', async (ctx, next) => {
   }
 });
 
+// ── MANEJO DE BOTONES (Callback Queries) ──────────────────────────────────
+bot.on('callback_query:data', async ctx => {
+  const data = ctx.callbackQuery.data;
+  const userId = ctx.from.id;
+  const session = await sessionsDB.get(userId);
+
+  if (!session) {
+    await ctx.answerCallbackQuery({ text: '⏳ La sesión expiró o ya fue completada.', show_alert: true });
+    return;
+  }
+
+  if (session.esperandoCampo === 'proveedor_nuevo_confirmar') {
+    if (data === 'prov_si') {
+      await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
+      await ctx.editMessageText(`📱 ¡Perfecto! Escribe el método de contacto para *${session.proveedor}*\n_(Ej: número de WhatsApp o link de Instagram)_:`, { parse_mode: 'Markdown' });
+      await ctx.answerCallbackQuery();
+    } else if (data === 'prov_no') {
+      await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
+      await ctx.editMessageText(`⏭️ Omitido. Proveedor no formalizado.`, { parse_mode: 'Markdown' });
+      await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      await ctx.answerCallbackQuery();
+    }
+  } else {
+    await ctx.answerCallbackQuery('Acción no válida en este punto.');
+  }
+});
+
 // ── MANEJO DE FOTOS ──────────────────────────────────────────────────────────
 bot.on('message:photo', async ctx => {
   const userId = ctx.from.id;
@@ -529,8 +561,11 @@ bot.on('message:photo', async ctx => {
       );
     } else if (campoInicial === 'proveedor_nuevo_confirmar') {
       await ctx.reply(
-        `🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?\nResponde *sí* o *no*`, 
-        { parse_mode: 'Markdown' }
+        `🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?`, 
+        { 
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard().text("Sí, pedir contacto", "prov_si").text("No, continuar", "prov_no")
+        }
       );
     } else {
       await askPrecio(ctx, analisis?.tipos);
