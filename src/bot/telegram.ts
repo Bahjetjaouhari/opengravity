@@ -284,7 +284,7 @@ bot.on('message:text', async (ctx, next) => {
     if (session.esperandoCampo === 'proveedor_nuevo_confirmar') {
       if (/^s[ií]|yes|claro|dale|afirm/i.test(text)) {
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
-        await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n_(Ej: "WhatsApp +58..." o "@su_instagram")_:`, { parse_mode: 'Markdown' });
+        await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n_(Ej: número de WhatsApp o link de Instagram)_:`, { parse_mode: 'Markdown' });
       } else {
         // "No" registrarlo formalmente. Seguimos con el precio
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
