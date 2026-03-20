@@ -12,10 +12,19 @@ interface PhotoSession {
   fileId: string;
   fileUrl: string;
   analisis?: { tipos: string[]; descripcion: string; confianza: string };
+  tiposManual?: string[];   // tipos ingresados manualmente si la IA no los detectó
   proveedor?: string;
   precio?: string;
   modalidad?: Modalidad;
-  esperandoCampo?: 'proveedor' | 'precio' | 'modalidad' | 'confirmar';
+  esperandoCampo?: 'tipo' | 'proveedor' | 'precio' | 'modalidad' | 'confirmar';
+}
+
+// Limpia el texto del proveedor: "Es de Lubass" → "Lubass", "Del proveedor Juan" → "Juan"
+function limpiarProveedor(texto: string): string {
+  return texto
+    .replace(/^(es de|es del|del proveedor|de|del|proveedor|es)\s+/i, '')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase()); // Capitalizar primera letra de cada palabra
 }
 const pendingPhotoSessions: Record<number, PhotoSession> = {};
 
@@ -131,8 +140,15 @@ bot.on('message:text', async (ctx, next) => {
 
   // ── Flujo de sesión pendiente de foto ────────────────────────────────────
   if (session) {
+    // Paso 0: Preguntar tipo manualmente si la IA no lo detectó
+    if (session.esperandoCampo === 'tipo') {
+      session.tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
+      session.esperandoCampo = 'proveedor';
+      await ctx.reply('👤 ¿De qué proveedor es esta mercancía?');
+      return;
+    }
     if (session.esperandoCampo === 'proveedor') {
-      session.proveedor = text;
+      session.proveedor = limpiarProveedor(text);  // ✅ "Es de Lubass" → "Lubass"
       session.esperandoCampo = 'precio';
       await ctx.reply('💰 ¿Precio? (Escribe el precio o "sin precio")');
       return;
@@ -151,11 +167,12 @@ bot.on('message:text', async (ctx, next) => {
       session.esperandoCampo = 'confirmar';
 
       const a = session.analisis;
-      const tiposTexto = a?.tipos?.join(', ') || 'Sin detectar';
+      const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+      const tiposTexto = tiposFinales.join(', ');
       await ctx.reply(
         `📋 *Resumen:*\n\n` +
-        `🏷️ Tipos detectados: ${tiposTexto}\n` +
-        `📝 ${a?.descripcion || 'N/A'}\n` +
+        `🏷️ Tipos: ${tiposTexto}\n` +
+        `📝 ${a?.descripcion || tiposTexto}\n` +
         `👤 Proveedor: ${session.proveedor}\n` +
         `💰 Precio: ${session.precio || 'Sin precio'}\n` +
         `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
@@ -167,10 +184,11 @@ bot.on('message:text', async (ctx, next) => {
     if (session.esperandoCampo === 'confirmar') {
       if (/^s[ií]|yes|ok|claro|dale|afirm/i.test(text)) {
         const a = session.analisis;
+        const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
         await inventarioDB.agregar({
           proveedor: session.proveedor!,
-          tipos: a?.tipos || ['artículo'],
-          nombre: a?.descripcion || 'Producto',
+          tipos: tiposFinales,
+          nombre: a?.descripcion || tiposFinales.join(' + '),
           precio: session.precio,
           foto_url: session.fileUrl,
           foto_file_id: session.fileId,
@@ -179,7 +197,8 @@ bot.on('message:text', async (ctx, next) => {
           fecha_carga: new Date().toISOString()
         });
         delete pendingPhotoSessions[userId];
-        await ctx.reply('✅ *¡Guardado exitosamente!* 🎉', { parse_mode: 'Markdown' });
+        const emoji = session.modalidad === 'propio' ? '✅' : '📦';
+        await ctx.reply(`${emoji} *¡Guardado exitosamente!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${session.precio || 'Sin precio'}`, { parse_mode: 'Markdown' });
       } else {
         delete pendingPhotoSessions[userId];
         await ctx.reply('❌ Cancelado. Envía la foto de nuevo cuando quieras.');
@@ -252,15 +271,23 @@ bot.on('message:photo', async ctx => {
       precio = precioMatch ? precioMatch[0] : undefined;
       modalidadCaption = /pedido|pedirlo|encargo/i.test(caption) ? 'pedido' : /propio|disponible/i.test(caption) ? 'propio' : undefined;
       const textoSinPrecio = caption.replace(/\$[\d,.]+|[\d,.]+\s*(bs|bolivares|usd|\$)/gi, '').trim();
-      proveedor = textoSinPrecio || undefined;
+      proveedor = textoSinPrecio ? limpiarProveedor(textoSinPrecio) : undefined;
     }
 
-    // Si tenemos todos los datos, guardamos sin preguntar
-    if (proveedor && modalidadCaption !== undefined) {
+    // Decidir desde qué campo arranca el flujo
+    const visionDetecto = analisis?.tipos?.length;
+    let campoInicial: PhotoSession['esperandoCampo'];
+    if (!visionDetecto && !proveedor) campoInicial = 'tipo';        // Preguntar tipo primero
+    else if (!proveedor) campoInicial = 'proveedor';                // Hay tipo pero no proveedor
+    else if (modalidadCaption === undefined) campoInicial = 'precio'; // Hay proveedor, falta precio
+    else campoInicial = 'confirmar';
+
+    // Si tenemos todos los datos incluyendo modalidad, guardamos directamente
+    if (proveedor && modalidadCaption !== undefined && visionDetecto) {
       await inventarioDB.agregar({
         proveedor,
-        tipos: analisis?.tipos || ['artículo'],
-        nombre: analisis?.descripcion || 'Producto',
+        tipos: analisis!.tipos,
+        nombre: analisis!.descripcion,
         precio,
         foto_url: fileUrl,
         foto_file_id: fileId,
@@ -269,37 +296,39 @@ bot.on('message:photo', async ctx => {
         fecha_carga: new Date().toISOString()
       });
       await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
-      const tiposTexto = analisis?.tipos.join(' + ') || 'artículo';
       return ctx.reply(
-        `✅ *Guardado automáticamente:*\n🏷️ ${tiposTexto} | 👤 ${proveedor} | 💰 ${precio || 'Sin precio'} | ${modalidadCaption === 'propio' ? '✅ Propio' : '📦 Pedido'}`,
+        `✅ *Guardado automáticamente:*\n🏷️ ${analisis!.tipos.join(' + ')} | 👤 ${proveedor} | 💰 ${precio || 'Sin precio'} | ${modalidadCaption === 'propio' ? '✅ Propio' : '📦 Pedido'}`,
         { parse_mode: 'Markdown' }
       );
     }
 
-    // Iniciamos el flujo interactivo de preguntas
+    // Iniciamos el flujo interactivo
     pendingPhotoSessions[userId] = {
       fileId,
       fileUrl,
       analisis: analisis || undefined,
       proveedor,
       precio,
-      esperandoCampo: proveedor ? 'precio' : 'proveedor'
+      esperandoCampo: campoInicial
     };
 
     await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
 
-    const tiposDetectados = analisis?.tipos?.length
-      ? analisis.tipos.join(' + ')
-      : 'No identificado';
-
-    let mensajeDeteccion = analisis
-      ? `🔍 *Detecté:* ${tiposDetectados}\n📝 ${analisis.descripcion} _(confianza: ${analisis.confianza})_\n\n`
-      : '🔍 No pude identificar los artículos automáticamente.\n\n';
-
-    if (!proveedor) {
-      await ctx.reply(`${mensajeDeteccion}👤 ¿De qué proveedor es esta mercancía?`, { parse_mode: 'Markdown' });
+    if (campoInicial === 'tipo') {
+      // La IA no detectó nada → preguntamos qué tipo es. Aclaramos que puede poner varios.
+      await ctx.reply(
+        `🔍 No pude identificar los artículos en la foto.\n\n` +
+        `🏷️ ¿Qué tipo(s) de artículo(s) hay?\n_Puedes escribir varios separados por coma o "y":_\n*Ej: gorra y franela* o *zapato, pantalon*`,
+        { parse_mode: 'Markdown' }
+      );
+    } else if (campoInicial === 'proveedor') {
+      const td = analisis!.tipos.join(' + ');
+      await ctx.reply(
+        `🔍 *Detecté:* ${td}\n📝 ${analisis!.descripcion} _(confianza: ${analisis!.confianza})_\n\n👤 ¿De qué proveedor es?`,
+        { parse_mode: 'Markdown' }
+      );
     } else {
-      await ctx.reply(`${mensajeDeteccion}💰 ¿Cuál es el precio?`, { parse_mode: 'Markdown' });
+      await ctx.reply(`💰 ¿Precio?`);
     }
 
   } catch (error: any) {
