@@ -56,8 +56,14 @@ export const sessionsDB = {
    * Persiste entre invocaciones serverless — es el estado "entre mensajes".
    */
   set: async (userId: number, session: Omit<PhotoSession, 'updatedAt'>): Promise<void> => {
+    // Firestore prohíbe explícitamente valores "undefined". 
+    // Limpiamos el objeto quitando las llaves con undefined.
+    const cleanSession = Object.fromEntries(
+      Object.entries(session).filter(([_, v]) => v !== undefined)
+    );
+
     await setDoc(doc(db, 'sessions', String(userId)), {
-      ...session,
+      ...cleanSession,
       updatedAt: Date.now()
     });
   },
