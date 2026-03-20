@@ -104,13 +104,71 @@ bot.command('start', ctx => {
     `• /pedido – Solo catálogo por pedido\n` +
     `• /proveedores – Lista de proveedores\n` +
     `• /tipos – Categorías con stock\n` +
-    `• /franelas /gorras /zapatos /pantalones etc.\n` +
-    `• /proveedor [nombre] – Stock de un proveedor\n` +
-    `• /post – Generar publicación WhatsApp/IG\n\n` +
+    `• /franelas /gorras /zapatos etc. – Catálogo\n` +
+    `• /post – Generar publicación WhatsApp/IG\n` +
+    `• /stats – Estadísticas del inventario\n` +
+    `• /tienda – Link de la tienda pública + QR\n\n` +
+    `❌ *Marcado como vendido:*\n` +
+    `• Envía una foto + escribe *"vendido"* junto a ella\n\n` +
     `💬 También puedes escribirme cualquier cosa para chatear.`,
     { parse_mode: 'Markdown' }
   );
 });
+
+// ── /stats ─────────────────────────────────────────────────────────────────
+bot.command('stats', async ctx => {
+  const todos = await inventarioDB.obtener();
+  const propios = todos.filter(p => p.modalidad === 'propio');
+  const pedidos = todos.filter(p => p.modalidad === 'pedido');
+
+  const conteoTipos: Record<string, number> = {};
+  todos.forEach(p => p.tipos.forEach(t => {
+    conteoTipos[t] = (conteoTipos[t] || 0) + 1;
+  }));
+  const tiposOrdenados = Object.entries(conteoTipos)
+    .sort(([,a],[,b]) => b - a)
+    .slice(0, 6);
+
+  const proveedores = await inventarioDB.listarProveedores();
+
+  await ctx.reply(
+    `📊 *Estadísticas del Inventario*\n\n` +
+    `📦 Total en stock: *${todos.length} fotos*\n` +
+    `✅ Disponibilidad inmediata: *${propios.length}*\n` +
+    `📦 Por pedido: *${pedidos.length}*\n` +
+    `👥 Proveedores activos: *${proveedores.length}*\n\n` +
+    `🏷️ *Por tipo:*\n` +
+    tiposOrdenados.map(([t, n]) => `• ${t.charAt(0).toUpperCase()+t.slice(1)}: ${n}`).join('\n') +
+    `\n\nUsa /tienda para ver el link público.`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// ── /tienda – Link + QR de la tienda pública ──────────────────────────────
+bot.command('tienda', async ctx => {
+  const vercelUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : 'https://opengravity.vercel.app';
+  const tiendaUrl = `${vercelUrl}/api/tienda`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(tiendaUrl)}&color=7B5FFF&bgcolor=0D0D18&margin=20`;
+
+  await ctx.reply(
+    `🏪 *Tu tienda pública está lista:*\n\n` +
+    `🌐 ${tiendaUrl}\n\n` +
+    `📱 Compártela en tus estados de WhatsApp o Instagram con el QR de abajo.`,
+    { parse_mode: 'Markdown' }
+  );
+  await ctx.replyWithPhoto(qrUrl, {
+    caption: `🔳 *QR de tu tienda OpenGravity*\n📲 Escanea para ver el catálogo`,
+    parse_mode: 'Markdown'
+  });
+});
+
+// ── /vendido – Orientación (el marcado real ocurre en el handler de fotos) ─
+bot.command('vendido', ctx => ctx.reply(
+  '✅ Para marcar algo como vendido, envíame la *foto del producto* y escribe *vendido* en la descripción.',
+  { parse_mode: 'Markdown' }
+));
 
 // ── Helper: enviar catálogo de fotos ──────────────────────────────────────
 async function enviarCatalogo(ctx: any, productos: any[], titulo: string) {
