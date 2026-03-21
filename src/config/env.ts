@@ -9,7 +9,6 @@ export const env = {
     .split(',')
     .map(id => parseInt(id.trim(), 10))
     .filter(id => !isNaN(id)),
-  GROQ_API_KEY: process.env.GROQ_API_KEY || '',
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
   OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || 'openrouter/free',
   DB_PATH: path.resolve(process.env.DB_PATH || './memory.db'),
@@ -28,4 +27,3 @@ export const env = {
 // Basic Validation
 if (!env.TELEGRAM_BOT_TOKEN) throw new Error('El TELEGRAM_BOT_TOKEN es necesario. Revisa tu .env.');
 if (env.TELEGRAM_ALLOWED_USER_IDS.length === 0) throw new Error('TELEGRAM_ALLOWED_USER_IDS no es válido o está vacío.');
-if (!env.GROQ_API_KEY) throw new Error('GROQ_API_KEY es obligatorio.');

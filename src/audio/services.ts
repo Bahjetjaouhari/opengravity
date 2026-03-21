@@ -1,6 +1,4 @@
 import { env } from '../config/env.js';
-import { groqClient } from '../agent/llm.js';
-
 // Transcribe un archivo de audio descargado desde una URL de Telegram usando Deepgram
 export async function transcribeAudioUrl(fileUrl: string): Promise<string> {
   const response = await fetch(fileUrl);
