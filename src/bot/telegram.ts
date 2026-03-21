@@ -594,10 +594,16 @@ bot.on('message:voice', async ctx => {
     const finalResp = response || 'Sin respuesta.';
 
     if (env.ELEVENLABS_API_KEY) {
-      await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🗣️ Generando respuesta de voz...`);
-      const audioBuffer = await generateSpeechElevenLabs(finalResp);
-      await ctx.replyWithVoice(new InputFile(audioBuffer, 'voice.mp3'), { caption: finalResp.substring(0, 1000) });
-      await ctx.api.deleteMessage(ctx.chat.id, pendingMsg.message_id);
+      try {
+        await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🗣️ Generando respuesta de voz...`);
+        const audioBuffer = await generateSpeechElevenLabs(finalResp);
+        await ctx.replyWithVoice(new InputFile(audioBuffer, 'voice.mp3'), { caption: finalResp.substring(0, 1000) });
+        await ctx.api.deleteMessage(ctx.chat.id, pendingMsg.message_id);
+      } catch (err: any) {
+        console.error('[Error ElevenLabs]', err);
+        // Fallback a texto mostrando el error si falla el audio
+        await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `(El audio falló: ${err.message})\n\n${finalResp}`);
+      }
     } else {
       await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, finalResp);
     }
