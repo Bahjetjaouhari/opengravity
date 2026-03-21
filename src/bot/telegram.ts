@@ -590,7 +590,7 @@ bot.on('message:voice', async ctx => {
     const transcript = await transcribeAudioUrl(fileUrl);
     await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🎙️ Me dijiste:\n"${transcript}"\n\n🤔 Procesando...`);
 
-    const response = await processUserMessage(userId, `(Nota de voz, responde en Español): ${transcript}`);
+    const response = await processUserMessage(userId, `(El usuario te ha enviado una nota de voz. Esta es la transcripción exacta de lo que dijo, respóndele de forma natural y conversacional): "${transcript}"`);
     const finalResp = response || 'Sin respuesta.';
 
     if (env.ELEVENLABS_API_KEY) {
