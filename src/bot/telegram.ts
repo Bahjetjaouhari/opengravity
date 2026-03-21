@@ -8,6 +8,19 @@ import { sessionsDB } from '../inventory/sessions.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
+const processedUpdates = new Set<number>();
+bot.use(async (ctx, next) => {
+  if (ctx.update.update_id && processedUpdates.has(ctx.update.update_id)) {
+    console.log(`[Deduplicator] Ignorando update duplicado: ${ctx.update.update_id}`);
+    return;
+  }
+  if (ctx.update.update_id) {
+    processedUpdates.add(ctx.update.update_id);
+    if (processedUpdates.size > 2000) processedUpdates.clear();
+  }
+  await next();
+});
+
 // Limpia el texto del proveedor: "Es de Lubass" → "Lubass"
 function limpiarProveedor(texto: string): string {
   return texto
@@ -587,10 +600,13 @@ bot.on('message:voice', async ctx => {
     const file = await ctx.api.getFile(fileId);
     const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
 
-    const transcript = await transcribeAudioUrl(fileUrl);
+    let transcript = await transcribeAudioUrl(fileUrl);
+    if (!transcript || transcript.trim() === '') {
+      transcript = "*[Nota de voz ininteligible o en silencio]*";
+    }
     await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `🎙️ Me dijiste:\n"${transcript}"\n\n🤔 Procesando...`);
 
-    const response = await processUserMessage(userId, `(El usuario te ha enviado una nota de voz. Esta es la transcripción exacta de lo que dijo, respóndele de forma natural y conversacional): "${transcript}"`);
+    const response = await processUserMessage(userId, transcript);
     const finalResp = response || 'Sin respuesta.';
 
     if (env.ELEVENLABS_API_KEY) {
