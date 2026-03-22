@@ -165,3 +165,14 @@ export const proveedoresDB = {
   }
 };
 
+export const adminDB = {
+  vaciarBaseDeDatos: async (): Promise<void> => {
+    const collections = ['inventario', 'proveedores', 'sesiones'];
+    for (const collName of collections) {
+      const q = collection(db, collName);
+      const snap = await getDocs(q);
+      const promises = snap.docs.map(d => deleteDoc(doc(db, collName, d.id)));
+      await Promise.all(promises);
+    }
+  }
+};

@@ -2,7 +2,7 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
-import { inventarioDB, Modalidad, proveedoresDB } from '../inventory/db.js';
+import { inventarioDB, Modalidad, proveedoresDB, adminDB } from '../inventory/db.js';
 import { analizarFotoMercancia, generarTextoVenta } from '../inventory/vision.js';
 import { sessionsDB } from '../inventory/sessions.js';
 
@@ -185,6 +185,22 @@ bot.command('stats', async ctx => {
   );
 });
 
+// ── /vaciardb – Borrar base de datos por completo ────────────────────────
+bot.command('vaciardb', async ctx => {
+  const code = ctx.match?.trim();
+  if (code === 'SUPERCLEAR2026') {
+    await ctx.reply('⚠️ Borrando la base de datos (Inventario, Proveedores y Sesiones)...');
+    try {
+      await adminDB.vaciarBaseDeDatos();
+      await ctx.reply('✅ Base de datos vaciada por completo desde cero.');
+    } catch (err: any) {
+      await ctx.reply(`❌ Error al vaciar la base de datos: ${err.message}`);
+    }
+  } else {
+    await ctx.reply('❌ Comando protegido.\n\nPara borrar la DB, usa:\n`/vaciardb SUPERCLEAR2026`', { parse_mode: 'Markdown' });
+  }
+});
+
 // ── /tienda – Link + QR de la tienda pública ──────────────────────────────
 bot.command('tienda', async ctx => {
   const vercelUrl = process.env.VERCEL_URL
@@ -300,7 +316,7 @@ bot.on('message:text', async (ctx, next) => {
     // ✅ Si mandan un comando mientras hay sesión activa, ignoramos el flujo
     // y dejamos que grammy lo maneje — pero le recordamos la sesión pendiente
     if (text.startsWith('/') && session.esperandoCampo !== undefined) {
-      const cmdsInventario = ['stats','tienda','inventario','propio','pedido','proveedores','tipos','post'];
+      const cmdsInventario = ['stats','tienda','inventario','propio','pedido','proveedores','tipos','post','vaciardb','vendido'];
       const cmd = text.slice(1).split(' ')[0].toLowerCase();
       if (cmdsInventario.includes(cmd)) {
         // Ejecutar el comando normalmente pasando al siguiente handler
@@ -474,7 +490,7 @@ bot.on('message:text', async (ctx, next) => {
 
   // ── Catálogos dinámicos por tipo (/franelas) y proveedor (/p_nombre) ─────
   if (text.startsWith('/')) {
-    const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post'];
+    const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post', 'vaciardb', 'stats', 'tienda', 'vendido'];
     if (text.startsWith('/p_')) {
       const pName = text.slice(3).replace(/_/g, ' ').trim();
       const infoProv = await proveedoresDB.obtenerPorNombre(pName);
