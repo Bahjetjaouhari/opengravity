@@ -21,6 +21,7 @@ export interface PhotoSession {
   tiposManual?: string[];
   descripcionManual?: string;
   proveedor?: string;
+  proveedorNuevoContacto?: string;
   precio?: string;
   precio_costo?: string;
   precios?: Record<string, string>;

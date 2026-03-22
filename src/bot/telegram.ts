@@ -91,7 +91,12 @@ function parsearPrecios(texto: string, tipos: string[]): {
 
 async function mostrarResumen(ctx: any, session: any) {
   const a = session.analisis;
-  const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+  const tiposStr = (a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']))
+    .map((t: string) => `#${t.replace(/\s+/g, '')}`)
+    .join(' ');
+  const pCommand = session.proveedor ? `/p_${session.proveedor.replace(/\s+/g, '_').toLowerCase()}` : 'Desconocido';
+  const desc = a?.descripcion || session.descripcionManual || (session.tiposManual || ['artículo']).join(' + ');
+
   const precios = session.precios || {};
   let precioResumen = 'Sin precio';
   if (Object.keys(precios).length > 0) {
@@ -103,9 +108,9 @@ async function mostrarResumen(ctx: any, session: any) {
 
   await ctx.reply(
     `📋 *Resumen:*\n\n` +
-    `🏷️ Tipos: ${tiposFinales.join(', ')}\n` +
-    `📝 ${a?.descripcion || tiposFinales.join(' + ')}\n` +
-    `👤 Proveedor: ${session.proveedor}\n` +
+    `🏷️ Tipos: ${tiposStr}\n` +
+    `📝 ${desc}\n` +
+    `👤 Proveedor: ${pCommand}\n` +
     `💰 Precio: ${precioResumen}\n` +
     `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Propia (stock)' : '📦 Pedido (proveedor)'}`,
     {
@@ -138,6 +143,7 @@ bot.command('start', ctx => {
     `• /propio – Solo tu stock físico\n` +
     `• /pedido – Solo catálogo por pedido\n` +
     `• /proveedores – Lista de proveedores\n` +
+    `• /p_nombre – Ver contacto y catálogo del proveedor\n` +
     `• /tipos – Categorías con stock\n` +
     `• /franelas /gorras /zapatos etc. – Catálogo\n` +
     `• /post – Generar publicación WhatsApp/IG\n` +
@@ -213,12 +219,15 @@ async function enviarCatalogo(ctx: any, productos: any[], titulo: string) {
   await ctx.reply(`📦 *${titulo}* (${productos.length} fotos):`, { parse_mode: 'Markdown' });
   for (let i = 0; i < productos.length; i += 10) {
     const grupo = productos.slice(i, i + 10);
-    const media = grupo.map((p: any) => ({
-      type: 'photo' as const,
-      media: p.foto_file_id,
-      caption: `*${p.nombre || p.tipos.join(' + ')}*\n🏷️ ${p.tipos.join(', ')} | 👤 ${p.proveedor} | 💰 ${p.precio || 'Sin precio'} | ${p.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`,
-      parse_mode: 'Markdown' as const
-    }));
+    const media = grupo.map((p: any) => {
+      const pCommand = `/p_${p.proveedor.replace(/\s+/g, '_').toLowerCase()}`;
+      return {
+        type: 'photo' as const,
+        media: p.foto_file_id,
+        caption: `*${p.nombre || p.tipos.join(' + ')}*\n🏷️ ${p.tipos.map((t: string) => `#${t.replace(/\s+/g, '')}`).join(' ')} \n👤 ${pCommand} | 💰 ${p.precio || 'Sin precio'} | ${p.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`,
+        parse_mode: 'Markdown' as const
+      };
+    });
     await ctx.replyWithMediaGroup(media);
   }
 }
@@ -243,7 +252,7 @@ bot.command('proveedores', async ctx => {
   const proveedores = await inventarioDB.listarProveedores();
   if (proveedores.length === 0) return ctx.reply('📭 No hay proveedores registrados.');
   await ctx.reply(
-    `👥 *Proveedores disponibles:*\n\n${proveedores.map(p => `• ${p}`).join('\n')}\n\n_Usa /proveedor [nombre] para ver su catálogo_`,
+    `👥 *Proveedores disponibles:*\n\n${proveedores.map(p => `• /p_${p.replace(/\s+/g, '_').toLowerCase()} - ${p}`).join('\n')}\n\n_Pisa un proveedor para ver su info_`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -343,10 +352,8 @@ bot.on('message:text', async (ctx, next) => {
     }
 
     if (session.esperandoCampo === 'proveedor_contacto') {
-      await proveedoresDB.agregar({ nombre: session.proveedor!, contacto: text });
-      await ctx.reply(`✅ Proveedor *${session.proveedor}* registrado exitosamente.`, { parse_mode: 'Markdown' });
-      await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
-      await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      await sessionsDB.set(userId, { ...session, proveedorNuevoContacto: text, esperandoCampo: 'precio' });
+      await ctx.reply(`✅ Contacto temporalmente guardado. Se registrará al confirmar.\n\n💰 ¿Cuál es el precio? (ej. 15 o "Por talla: S=10, M=15")`, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -423,6 +430,17 @@ bot.on('message:text', async (ctx, next) => {
       if (/^s[ií]|yes|ok|claro|dale|afirm|listo|guarda/i.test(text)) {
         const a = session.analisis;
         const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+        const tiposStr = (a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']))
+    .map(t => `#${t.replace(/\s+/g, '')}`)
+    .join(' ');
+  const pCommand = session.proveedor ? `/p_${session.proveedor.replace(/\s+/g, '_').toLowerCase()}` : '';
+  const desc = a?.descripcion || session.descripcionManual || (session.tiposManual || ['artículo']).join(' + ');
+
+  const resume = `📋 *Resumen:*\n\n` +
+    `🏷️ Tipos: ${tiposStr}\n` +
+    `📝 ${desc}\n` +
+    `👤 Proveedor: ${pCommand}\n` +
+    `💰 Precio: ${session.precio_total || session.precio || 'Sin precio'}\n`;
         await inventarioDB.agregar({
           proveedor: session.proveedor!,
           tipos: tiposFinales,
@@ -454,18 +472,29 @@ bot.on('message:text', async (ctx, next) => {
     }
   }
 
-  // ── Catálogos dinámicos por tipo: /franelas, /gorras, /zapatos, etc. ─────
+  // ── Catálogos dinámicos por tipo (/franelas) y proveedor (/p_nombre) ─────
   if (text.startsWith('/')) {
     const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post'];
+    if (text.startsWith('/p_')) {
+      const pName = text.slice(3).replace(/_/g, ' ').trim();
+      const infoProv = await proveedoresDB.obtenerPorNombre(pName);
+      if (infoProv) {
+        await ctx.reply(`👤 *Proveedor:* ${infoProv.nombre}\n📱 *Contacto:* ${infoProv.contacto || 'Sin contacto registrado'}\n\n👇 Catálogo de sus productos:`, { parse_mode: 'Markdown' });
+      } else {
+        await ctx.reply(`👤 *Proveedor:* ${pName.toUpperCase()}\n📱 *Contacto:* Sin contacto registrado\n\n👇 Catálogo de sus productos:`, { parse_mode: 'Markdown' });
+      }
+      const productos = await inventarioDB.obtener({ proveedor: pName });
+      await enviarCatalogo(ctx, productos, `Catálogo de ${pName}`);
+      return;
+    }
+
     const cmd = text.slice(1).split(' ')[0].replace(/_/g, ' ').trim();
-    
     if (!knownCommands.includes(cmd)) {
       const productos = await inventarioDB.obtener({ tipo: cmd });
       if (productos.length > 0) {
         await enviarCatalogo(ctx, productos, `Catálogo de ${cmd}s`);
         return;
       }
-      // Si no hay productos de ese tipo, dejamos caer al chat IA
     }
   }
 
@@ -518,6 +547,12 @@ bot.on('callback_query:data', async ctx => {
   } else if (session.esperandoCampo === 'confirmar') {
     if (data === 'res_guardar') {
       try {
+        if (session.proveedorNuevoContacto && session.proveedor) {
+          const existe = await proveedoresDB.obtenerPorNombre(session.proveedor);
+          if (!existe) {
+            await proveedoresDB.agregar({ nombre: session.proveedor, contacto: session.proveedorNuevoContacto });
+          }
+        }
         const a = session.analisis;
         const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
         await inventarioDB.agregar({
@@ -537,8 +572,9 @@ bot.on('callback_query:data', async ctx => {
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
         const precioFinal = session.precio_total || session.precio || 'Sin precio';
         await ctx.editMessageText(`✅ Resumen aprobado.`);
+        const pCommand = `/p_${session.proveedor!.replace(/\s+/g, '_').toLowerCase()}`;
         await ctx.reply(
-          `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
+          `${emoji} *¡Mercancía Almacenada!*\n📝 ${a?.descripcion || session.descripcionManual || tiposFinales.join(' + ')}\n👤 ${pCommand} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
           { parse_mode: 'Markdown' }
         );
         await ctx.answerCallbackQuery('Guardado exitosamente');

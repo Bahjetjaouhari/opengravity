@@ -1,0 +1,7 @@
+
+> opengravity@1.0.0 start
+> tsx src/index.ts
+
+[Sistema] Iniciando OpenGravity en modo local...
+[Telegram] Iniciando bot con long-polling...
+[Sistema] Servidor HTTP de Health Check activo en el puerto 8080
