@@ -19,6 +19,7 @@ export interface PhotoSession {
   fileUrl: string;
   analisis?: { tipos: string[]; descripcion: string; confianza: string };
   tiposManual?: string[];
+  descripcionManual?: string;
   proveedor?: string;
   precio?: string;
   precio_costo?: string;

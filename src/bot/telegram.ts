@@ -304,8 +304,12 @@ bot.on('message:text', async (ctx, next) => {
     }
 
     if (session.esperandoCampo === 'tipo') {
-      const tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
-      await sessionsDB.set(userId, { ...session, tiposManual, esperandoCampo: 'proveedor' });
+      const tiposStr = text;
+      // Reemplaza los separadores por comas y luego split
+      const partes = tiposStr.replace(/\s+(y|e)\s+/gi, ',').split(/[,&+]/).map(t => t.trim().toLowerCase()).filter(Boolean);
+      const tiposManual = partes.map(t => t.replace(/\s+/g, ''));
+      const descripcionManual = partes.join(' + ');
+      await sessionsDB.set(userId, { ...session, tiposManual, descripcionManual, esperandoCampo: 'proveedor' });
       await ctx.reply('👤 ¿De qué proveedor es esta mercancía?');
       return;
     }
@@ -384,9 +388,11 @@ bot.on('message:text', async (ctx, next) => {
     if (session.esperandoCampo === 'editando_campo') {
       // El usuario acaba de enviar el nuevo valor
       if (session.campoAEditar === 'tipo') {
-        const tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
+        const partes = text.replace(/\s+(y|e)\s+/gi, ',').split(/[,&+]/).map(t => t.trim().toLowerCase()).filter(Boolean);
+        const tiposManual = partes.map(t => t.replace(/\s+/g, ''));
         if (session.analisis) session.analisis.tipos = tiposManual;
         session.tiposManual = tiposManual;
+        session.descripcionManual = partes.join(' + ');
       } else if (session.campoAEditar === 'proveedor') {
         session.proveedor = limpiarProveedor(text);
       } else if (session.campoAEditar === 'precio') {
@@ -514,30 +520,36 @@ bot.on('callback_query:data', async ctx => {
     await ctx.answerCallbackQuery();
   } else if (session.esperandoCampo === 'confirmar') {
     if (data === 'res_guardar') {
-      const a = session.analisis;
-      const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
-      await inventarioDB.agregar({
-        proveedor: session.proveedor!,
-        tipos: tiposFinales,
-        nombre: a?.descripcion || tiposFinales.join(' + '),
-        precio: session.precio,
-        precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
-        precio_total: session.precio_total,
-        foto_url: session.fileUrl,
-        foto_file_id: session.fileId,
-        disponible: true,
-        modalidad: session.modalidad!,
-        fecha_carga: new Date().toISOString()
-      });
-      await sessionsDB.delete(userId);
-      const emoji = session.modalidad === 'propio' ? '✅' : '📦';
-      const precioFinal = session.precio_total || session.precio || 'Sin precio';
-      await ctx.editMessageText(`✅ Resumen aprobado.`);
-      await ctx.reply(
-        `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
-        { parse_mode: 'Markdown' }
-      );
-      await ctx.answerCallbackQuery('Guardado exitosamente');
+      try {
+        const a = session.analisis;
+        const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+        await inventarioDB.agregar({
+          proveedor: session.proveedor!,
+          tipos: tiposFinales,
+          nombre: a?.descripcion || session.descripcionManual || tiposFinales.join(' + '),
+          precio: session.precio,
+          precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
+          precio_total: session.precio_total,
+          foto_url: session.fileUrl,
+          foto_file_id: session.fileId,
+          disponible: true,
+          modalidad: session.modalidad!,
+          fecha_carga: new Date().toISOString()
+        });
+        await sessionsDB.delete(userId);
+        const emoji = session.modalidad === 'propio' ? '✅' : '📦';
+        const precioFinal = session.precio_total || session.precio || 'Sin precio';
+        await ctx.editMessageText(`✅ Resumen aprobado.`);
+        await ctx.reply(
+          `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
+          { parse_mode: 'Markdown' }
+        );
+        await ctx.answerCallbackQuery('Guardado exitosamente');
+      } catch (err: any) {
+        console.error('[Error Guardando]', err);
+        await ctx.reply(`❌ Fallo al guardar en la base de datos: ${err.message}`);
+        await ctx.answerCallbackQuery('Error guardando');
+      }
     } else if (data === 'res_descartar') {
       await sessionsDB.delete(userId);
       await ctx.editMessageText(`❌ Descartado. Envía la foto de nuevo cuando quieras.`);
