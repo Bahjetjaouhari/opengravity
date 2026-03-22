@@ -23,8 +23,10 @@ export interface Producto {
   proveedor: string;
   tipos: string[];
   nombre: string;
-  // Precio único (si es conjunto sin desglose): "$70"
+  // Precio de venta único
   precio?: string;
+  // Precio de costo (para cálculo de ganancias)
+  precio_costo?: string;
   // Precios individuales por tipo: { gorra: "$20", franela: "$50" }
   precios?: Record<string, string>;
   // Total calculado automáticamente si se pusieron precios individuales
@@ -55,8 +57,11 @@ export const inventarioDB = {
   },
 
   agregar: async (producto: Omit<Producto, 'id'>): Promise<string> => {
+    // Serializar y deserializar es el truco perfecto de TS para eliminar recursivamente todo lo que sea "undefined" o inválido.
+    const cleanProducto = JSON.parse(JSON.stringify(producto));
+
     const docRef = await addDoc(collection(db, 'inventario'), {
-      ...producto,
+      ...cleanProducto,
       tipos: producto.tipos.map(normalizarTipo),
       disponible: true,
       fecha_carga: new Date().toISOString()
