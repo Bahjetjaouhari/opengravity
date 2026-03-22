@@ -89,6 +89,36 @@ function parsearPrecios(texto: string, tipos: string[]): {
   return { precios, precio_total: undefined };
 }
 
+async function mostrarResumen(ctx: any, session: any) {
+  const a = session.analisis;
+  const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+  const precios = session.precios || {};
+  let precioResumen = 'Sin precio';
+  if (Object.keys(precios).length > 0) {
+    const desglose = Object.entries(precios).map(([t, p]) => `${t}: ${p}`).join(', ');
+    precioResumen = session.precio_total ? `${session.precio_total} (${desglose})` : desglose;
+  } else if (session.precio) {
+    precioResumen = session.precio;
+  }
+
+  await ctx.reply(
+    `📋 *Resumen:*\n\n` +
+    `🏷️ Tipos: ${tiposFinales.join(', ')}\n` +
+    `📝 ${a?.descripcion || tiposFinales.join(' + ')}\n` +
+    `👤 Proveedor: ${session.proveedor}\n` +
+    `💰 Precio: ${precioResumen}\n` +
+    `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Propia (stock)' : '📦 Pedido (proveedor)'}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard()
+        .text("💾 Guardar", "res_guardar")
+        .text("🗑️ Descartar", "res_descartar")
+        .row()
+        .text("✏️ Editar", "res_editar")
+    }
+  );
+}
+
 // ── Middleware de seguridad ────────────────────────────────────────────────
 bot.use(async (ctx, next) => {
   if (ctx.from && env.TELEGRAM_ALLOWED_USER_IDS.includes(ctx.from.id)) {
@@ -332,8 +362,13 @@ bot.on('message:text', async (ctx, next) => {
       }
       await sessionsDB.set(userId, { ...session, ...patchPrecio, esperandoCampo: 'modalidad' });
       await ctx.reply(
-        '📦 ¿Esta mercancía es:\n\n1️⃣ *Propia* – La tienes físicamente en stock\n2️⃣ *Por pedido* – Es del catálogo del proveedor\n\nResponde *1* o *2*',
-        { parse_mode: 'Markdown' }
+        '📦 ¿Esta mercancía es propia o por pedido?',
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text("📦 Propia (stock)", "mod_propia")
+            .text("🚚 Pedido (proveedor)", "mod_pedido")
+        }
       );
       return;
     }
@@ -342,28 +377,33 @@ bot.on('message:text', async (ctx, next) => {
       const modalidad: Modalidad = text.includes('1') || /propio|propia/i.test(text) ? 'propio' : 'pedido';
       const updated = { ...session, modalidad, esperandoCampo: 'confirmar' as const };
       await sessionsDB.set(userId, updated);
+      await mostrarResumen(ctx, updated);
+      return;
+    }
 
-      const a = session.analisis;
-      const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
-      const precios = session.precios || {};
-      let precioResumen = 'Sin precio';
-      if (Object.keys(precios).length > 0) {
-        const desglose = Object.entries(precios).map(([t, p]) => `${t}: ${p}`).join(', ');
-        precioResumen = session.precio_total ? `${session.precio_total} (${desglose})` : desglose;
-      } else if (session.precio) {
-        precioResumen = session.precio;
+    if (session.esperandoCampo === 'editando_campo') {
+      // El usuario acaba de enviar el nuevo valor
+      if (session.campoAEditar === 'tipo') {
+        const tiposManual = text.split(/[,y&+]/i).map(t => t.trim().toLowerCase()).filter(Boolean);
+        if (session.analisis) session.analisis.tipos = tiposManual;
+        session.tiposManual = tiposManual;
+      } else if (session.campoAEditar === 'proveedor') {
+        session.proveedor = limpiarProveedor(text);
+      } else if (session.campoAEditar === 'precio') {
+        const tiposActivos = session.analisis?.tipos?.length ? session.analisis.tipos : (session.tiposManual || []);
+        if (/sin precio/i.test(text)) {
+           session.precio = undefined; session.precios = {}; session.precio_total = undefined;
+        } else {
+           const parsed = parsearPrecios(text, tiposActivos);
+           session.precios = parsed.precios; session.precio_total = parsed.precio_total; session.precio = parsed.precio;
+        }
+      } else if (session.campoAEditar === 'modalidad') {
+        session.modalidad = text.includes('1') || /propio|propia/i.test(text) ? 'propio' : 'pedido';
       }
-
-      await ctx.reply(
-        `📋 *Resumen:*\n\n` +
-        `🏷️ Tipos: ${tiposFinales.join(', ')}\n` +
-        `📝 ${a?.descripcion || tiposFinales.join(' + ')}\n` +
-        `👤 Proveedor: ${session.proveedor}\n` +
-        `💰 Precio: ${precioResumen}\n` +
-        `📦 Modalidad: ${modalidad === 'propio' ? '✅ Stock propio' : '📦 Por pedido'}\n\n` +
-        `¿Guardar? Responde *sí* o *no*`,
-        { parse_mode: 'Markdown' }
-      );
+      
+      session.esperandoCampo = 'confirmar';
+      await sessionsDB.set(userId, session);
+      await mostrarResumen(ctx, session);
       return;
     }
 
@@ -397,15 +437,15 @@ bot.on('message:text', async (ctx, next) => {
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
         const precioFinal = session.precio_total || session.precio || 'Sin precio';
         await ctx.reply(
-          `${emoji} *¡Guardado!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`,
+          `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`,
           { parse_mode: 'Markdown' }
         );
-      } else if (/^no|cancel|nope/i.test(text)) {
+      } else if (/^no|cancel|nope|descarta/i.test(text)) {
         await sessionsDB.delete(userId);
-        await ctx.reply('❌ Cancelado. Envía la foto de nuevo cuando quieras.');
+        await ctx.reply('❌ Descartado. Envía la foto de nuevo cuando quieras.');
       } else {
         // Respuesta ambigua — recordamos las opciones
-        await ctx.reply('Responde *sí* para guardar o *no* para cancelar.', { parse_mode: 'Markdown' });
+        await ctx.reply('☝️ Usa los botones del resumen o responde *sí* para guardar o *no* para descartar.', { parse_mode: 'Markdown' });
       }
       return;
     }
@@ -463,6 +503,68 @@ bot.on('callback_query:data', async ctx => {
       await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
       await ctx.editMessageText(`⏭️ Omitido. Proveedor no formalizado.`, { parse_mode: 'Markdown' });
       await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
+      await ctx.answerCallbackQuery();
+    }
+  } else if (session.esperandoCampo === 'modalidad' && (data === 'mod_propia' || data === 'mod_pedido')) {
+    const modalidad: Modalidad = data === 'mod_propia' ? 'propio' : 'pedido';
+    const updated = { ...session, modalidad, esperandoCampo: 'confirmar' as const };
+    await sessionsDB.set(userId, updated);
+    await ctx.editMessageText(`⏭️ Modalidad seleccionada: ${modalidad === 'propio' ? '📦 Propia (stock)' : '🚚 Pedido (proveedor)'}`);
+    await mostrarResumen(ctx, updated);
+    await ctx.answerCallbackQuery();
+  } else if (session.esperandoCampo === 'confirmar') {
+    if (data === 'res_guardar') {
+      const a = session.analisis;
+      const tiposFinales = a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']);
+      await inventarioDB.agregar({
+        proveedor: session.proveedor!,
+        tipos: tiposFinales,
+        nombre: a?.descripcion || tiposFinales.join(' + '),
+        precio: session.precio,
+        precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
+        precio_total: session.precio_total,
+        foto_url: session.fileUrl,
+        foto_file_id: session.fileId,
+        disponible: true,
+        modalidad: session.modalidad!,
+        fecha_carga: new Date().toISOString()
+      });
+      await sessionsDB.delete(userId);
+      const emoji = session.modalidad === 'propio' ? '✅' : '📦';
+      const precioFinal = session.precio_total || session.precio || 'Sin precio';
+      await ctx.editMessageText(`✅ Resumen aprobado.`);
+      await ctx.reply(
+        `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
+        { parse_mode: 'Markdown' }
+      );
+      await ctx.answerCallbackQuery('Guardado exitosamente');
+    } else if (data === 'res_descartar') {
+      await sessionsDB.delete(userId);
+      await ctx.editMessageText(`❌ Descartado. Envía la foto de nuevo cuando quieras.`);
+      await ctx.answerCallbackQuery('Descartado');
+    } else if (data === 'res_editar') {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+      await ctx.reply(
+        `✏️ ¿Qué campo deseas editar?`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: new InlineKeyboard()
+            .text("🏷️ Tipos", "edit_tipo")
+            .text("👤 Proveedor", "edit_proveedor")
+            .row()
+            .text("💰 Precio", "edit_precio")
+            .text("📦 Modalidad", "edit_modalidad")
+        }
+      );
+      await ctx.answerCallbackQuery();
+    } else if (data.startsWith('edit_')) {
+      const campo = data.replace('edit_', '');
+      await sessionsDB.set(userId, { ...session, esperandoCampo: 'editando_campo', campoAEditar: campo });
+      await ctx.editMessageText(`Elegiste editar: *${campo.toUpperCase()}*`, { parse_mode: 'Markdown' });
+      if (campo === 'tipo') await ctx.reply(`🏷️ Escribe los nuevos tipos separados por comas:`);
+      else if (campo === 'proveedor') await ctx.reply(`👤 Escribe el nombre del nuevo proveedor:`);
+      else if (campo === 'precio') await ctx.reply(`💰 Escribe el nuevo precio (o "sin precio"):`);
+      else if (campo === 'modalidad') await ctx.reply(`📦 Escribe 1 para Propia o 2 para Por pedido:`);
       await ctx.answerCallbackQuery();
     }
   } else {
