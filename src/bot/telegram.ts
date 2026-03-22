@@ -213,14 +213,11 @@ async function enviarCatalogo(ctx: any, productos: any[], titulo: string) {
   await ctx.reply(`📦 *${titulo}* (${productos.length} fotos):`, { parse_mode: 'Markdown' });
   for (let i = 0; i < productos.length; i += 10) {
     const grupo = productos.slice(i, i + 10);
-    const media = grupo.map((p: any, idx: number) => ({
+    const media = grupo.map((p: any) => ({
       type: 'photo' as const,
       media: p.foto_file_id,
-      ...(idx === 0 ? {
-        caption: grupo.map((pr: any) =>
-          `🏷️ ${pr.tipos.join(' + ')} | 👤 ${pr.proveedor} | 💰 ${pr.precio || 'Sin precio'} | ${pr.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`
-        ).join('\n')
-      } : {})
+      caption: `*${p.nombre || p.tipos.join(' + ')}*\n🏷️ ${p.tipos.join(', ')} | 👤 ${p.proveedor} | 💰 ${p.precio || 'Sin precio'} | ${p.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`,
+      parse_mode: 'Markdown' as const
     }));
     await ctx.replyWithMediaGroup(media);
   }
