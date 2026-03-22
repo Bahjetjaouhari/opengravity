@@ -27,7 +27,7 @@ export interface PhotoSession {
   precios?: Record<string, string>;
   precio_total?: string;
   modalidad?: Modalidad;
-  esperandoCampo?: 'tipo' | 'proveedor' | 'proveedor_nuevo_confirmar' | 'proveedor_contacto' | 'precio' | 'modalidad' | 'confirmar' | 'editando_campo';
+  esperandoCampo?: 'tipo' | 'proveedor' | 'proveedor_nuevo_confirmar' | 'proveedor_contacto' | 'precio' | 'modalidad' | 'confirmar' | 'editando_campo' | 'codigo_wipe';
   campoAEditar?: string;
   updatedAt: number;
 }

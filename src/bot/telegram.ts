@@ -185,20 +185,18 @@ bot.command('stats', async ctx => {
   );
 });
 
-// ── /vaciardb – Borrar base de datos por completo ────────────────────────
-bot.command('vaciardb', async ctx => {
-  const code = ctx.match?.trim();
-  if (code === 'SUPERCLEAR2026') {
-    await ctx.reply('⚠️ Borrando la base de datos (Inventario, Proveedores y Sesiones)...');
-    try {
-      await adminDB.vaciarBaseDeDatos();
-      await ctx.reply('✅ Base de datos vaciada por completo desde cero.');
-    } catch (err: any) {
-      await ctx.reply(`❌ Error al vaciar la base de datos: ${err.message}`);
-    }
-  } else {
-    await ctx.reply('❌ Comando protegido.\n\nPara borrar la DB, usa:\n`/vaciardb SUPERCLEAR2026`', { parse_mode: 'Markdown' });
-  }
+// ── /vaciarbd – Borrar base de datos por completo ────────────────────────
+bot.command('vaciarbd', async ctx => {
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  
+  await sessionsDB.set(userId, {
+    fileId: '',
+    fileUrl: '',
+    esperandoCampo: 'codigo_wipe'
+  });
+  
+  await ctx.reply('⚠️ ATENCIÓN: Estás a punto de borrar todo el inventario.\n\nPor favor, ingresa el código de seguridad para confirmar:', { parse_mode: 'Markdown' });
 });
 
 // ── /tienda – Link + QR de la tienda pública ──────────────────────────────
@@ -316,13 +314,29 @@ bot.on('message:text', async (ctx, next) => {
     // ✅ Si mandan un comando mientras hay sesión activa, ignoramos el flujo
     // y dejamos que grammy lo maneje — pero le recordamos la sesión pendiente
     if (text.startsWith('/') && session.esperandoCampo !== undefined) {
-      const cmdsInventario = ['stats','tienda','inventario','propio','pedido','proveedores','tipos','post','vaciardb','vendido'];
+      const cmdsInventario = ['stats','tienda','inventario','propio','pedido','proveedores','tipos','post','vaciarbd','vendido'];
       const cmd = text.slice(1).split(' ')[0].toLowerCase();
       if (cmdsInventario.includes(cmd)) {
         // Ejecutar el comando normalmente pasando al siguiente handler
         return next();
       }
       // Para el confirmar, si envían otro texto que no es sí/no mostramos ayuda
+    }
+
+    if (session.esperandoCampo === 'codigo_wipe') {
+      if (text === '251125') {
+        const msg = await ctx.reply('⚙️ Vaciando almacén...');
+        try {
+          await adminDB.vaciarBaseDeDatos();
+          await ctx.api.editMessageText(ctx.chat.id, msg.message_id, '✅ El almacén fue vaciado.');
+        } catch (err: any) {
+          await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `❌ Error al vaciar el almacén: ${err.message}`);
+        }
+      } else {
+        await ctx.reply('❌ Código incorrecto. Operación cancelada.');
+      }
+      await sessionsDB.delete(userId);
+      return;
     }
 
     if (session.esperandoCampo === 'tipo') {
@@ -490,7 +504,7 @@ bot.on('message:text', async (ctx, next) => {
 
   // ── Catálogos dinámicos por tipo (/franelas) y proveedor (/p_nombre) ─────
   if (text.startsWith('/')) {
-    const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post', 'vaciardb', 'stats', 'tienda', 'vendido'];
+    const knownCommands = ['start', 'inventario', 'propio', 'pedido', 'proveedores', 'tipos', 'proveedor', 'post', 'vaciarbd', 'stats', 'tienda', 'vendido'];
     if (text.startsWith('/p_')) {
       const pName = text.slice(3).replace(/_/g, ' ').trim();
       const infoProv = await proveedoresDB.obtenerPorNombre(pName);
