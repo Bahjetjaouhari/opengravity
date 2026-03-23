@@ -1,7 +1,32 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+    // ⚠️ SECURITY WARNING ⚠️
+    // Estas reglas permiten acceso completo sin autenticación.
+    // Esto es aceptable SOLO para proyectos personales/no públicos.
+    //
+    // Para producción con usuarios múltiples, considera:
+    // 1. Firebase Authentication
+    // 2. Reglas basadas en request.auth.uid
+    // 3. Validación de datos con request.resource
+    //
+    // Ejemplo seguro para producción:
+    // allow read: if request.auth != null;
+    // allow write: if request.auth.uid in ['user_id_1', 'user_id_2'];
+
+    match /inventario/{docId} {
+      allow read, write: if true;
+    }
+
+    match /proveedores/{docId} {
+      allow read, write: if true;
+    }
+
+    match /sessions/{docId} {
+      allow read, write: if true;
+    }
+
+    match /messages/{docId} {
       allow read, write: if true;
     }
   }

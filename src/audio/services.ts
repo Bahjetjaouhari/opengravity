@@ -1,20 +1,22 @@
 import { env } from '../config/env.js';
+
 // Transcribe un archivo de audio descargado desde una URL de Telegram usando Deepgram
 export async function transcribeAudioUrl(fileUrl: string): Promise<string> {
+  if (!env.DEEPGRAM_API_KEY) {
+    throw new Error('DEEPGRAM_API_KEY no está configurada. Agrega DEEPGRAM_API_KEY a tu .env');
+  }
+
   const response = await fetch(fileUrl);
   if (!response.ok) throw new Error(`Error descargando audio: ${response.statusText}`);
-  
+
   const arrayBuffer = await response.arrayBuffer();
-  
-  // Clave introducida de forma manual por orden expresa
-  const deepgramApiKey = process.env.DEEPGRAM_API_KEY || 'c970dc8a996021a26875b0819cd486a00b8d1d2d';
 
   console.log('[Audio] Transcribiendo nota de voz con Deepgram...');
   
   const dgResponse = await fetch('https://api.deepgram.com/v1/listen?model=nova-2&language=es', {
     method: 'POST',
     headers: {
-      'Authorization': `Token ${deepgramApiKey}`,
+      'Authorization': `Token ${env.DEEPGRAM_API_KEY}`,
       'Content-Type': 'audio/ogg' // Formato nativo de Telegram Voice Notes
     },
     body: Buffer.from(arrayBuffer)

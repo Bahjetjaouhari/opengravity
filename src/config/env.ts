@@ -21,9 +21,19 @@ export const env = {
   FIREBASE_MESSAGING_SENDER_ID: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
   FIREBASE_APP_ID: process.env.FIREBASE_APP_ID || '',
   
-  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || ''
+  ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY || '',
+
+  DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || '',
+
+  // PIN de seguridad para comando /vaciarbd
+  WIPE_DB_PIN: process.env.WIPE_DB_PIN || '',
+
+  // WhatsApp para tienda pública (sin el +)
+  WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || ''
 };
 
 // Basic Validation
 if (!env.TELEGRAM_BOT_TOKEN) throw new Error('El TELEGRAM_BOT_TOKEN es necesario. Revisa tu .env.');
 if (env.TELEGRAM_ALLOWED_USER_IDS.length === 0) throw new Error('TELEGRAM_ALLOWED_USER_IDS no es válido o está vacío.');
+if (!env.DEEPGRAM_API_KEY) throw new Error('DEEPGRAM_API_KEY es necesario para transcripción de audio. Revisa tu .env.');
+if (!env.WIPE_DB_PIN) console.warn('[Config] WIPE_DB_PIN no configurado - comando /vaciarbd deshabilitado.');

@@ -18,6 +18,13 @@ const db = getFirestore(app);
 
 export type Modalidad = 'propio' | 'pedido';
 
+export interface FotoProducto {
+  file_id: string;
+  url: string;
+  orden: number;       // Para ordenar en galería (0 = principal)
+  principal: boolean;  // Foto de portada
+}
+
 export interface Producto {
   id?: string;
   proveedor: string;
@@ -31,8 +38,11 @@ export interface Producto {
   precios?: Record<string, string>;
   // Total calculado automáticamente si se pusieron precios individuales
   precio_total?: string;
-  foto_url: string;
-  foto_file_id: string;
+  // Soporte para múltiples fotos (array, la primera es la principal)
+  fotos?: FotoProducto[];
+  // Campos legacy para compatibilidad hacia atrás
+  foto_url?: string;
+  foto_file_id?: string;
   disponible: boolean;
   modalidad: Modalidad;
   fecha_carga: string;
@@ -41,6 +51,30 @@ export interface Producto {
 // Normaliza el texto de un tipo para evitar duplicados por acentos/mayúsculas
 const normalizarTipo = (t: string) => t.toLowerCase().trim()
   .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // elimina acentos
+
+/**
+ * Normaliza un producto legacy (foto_url/foto_file_id) al nuevo formato con array fotos.
+ * Mantiene compatibilidad hacia atrás con productos existentes.
+ */
+function normalizarProducto(data: any): Producto {
+  const producto = { ...data } as Producto;
+
+  // Si el producto tiene el formato legacy (foto_url/foto_file_id pero no fotos)
+  if (!producto.fotos || producto.fotos.length === 0) {
+    if (data.foto_file_id && data.foto_url) {
+      producto.fotos = [{
+        file_id: data.foto_file_id,
+        url: data.foto_url,
+        orden: 0,
+        principal: true
+      }];
+    } else {
+      producto.fotos = [];
+    }
+  }
+
+  return producto;
+}
 
 export const inventarioDB = {
 
@@ -56,6 +90,47 @@ export const inventarioDB = {
     return producto.precio_total || producto.precio || 'Sin precio';
   },
 
+  /**
+   * Helper: obtiene la foto principal de un producto.
+   * Si tiene array fotos, retorna la marcada como principal o la primera.
+   * Fallback a formato legacy.
+   */
+  getFotoPrincipal: (producto: Producto): FotoProducto | null => {
+    if (producto.fotos && producto.fotos.length > 0) {
+      const principal = producto.fotos.find(f => f.principal);
+      return principal || producto.fotos[0];
+    }
+    // Fallback legacy
+    if (producto.foto_file_id && producto.foto_url) {
+      return {
+        file_id: producto.foto_file_id,
+        url: producto.foto_url,
+        orden: 0,
+        principal: true
+      };
+    }
+    return null;
+  },
+
+  /**
+   * Helper: obtiene todas las fotos de un producto en orden.
+   */
+  getTodasLasFotos: (producto: Producto): FotoProducto[] => {
+    if (producto.fotos && producto.fotos.length > 0) {
+      return [...producto.fotos].sort((a, b) => a.orden - b.orden);
+    }
+    // Fallback legacy
+    if (producto.foto_file_id && producto.foto_url) {
+      return [{
+        file_id: producto.foto_file_id,
+        url: producto.foto_url,
+        orden: 0,
+        principal: true
+      }];
+    }
+    return [];
+  },
+
   agregar: async (producto: Omit<Producto, 'id'>): Promise<string> => {
     // Serializar y deserializar es el truco perfecto de TS para eliminar recursivamente todo lo que sea "undefined" o inválido.
     const cleanProducto = JSON.parse(JSON.stringify(producto));
@@ -67,6 +142,34 @@ export const inventarioDB = {
       fecha_carga: new Date().toISOString()
     });
     return docRef.id;
+  },
+
+  /**
+   * Agrega fotos adicionales a un producto existente.
+   */
+  agregarFotos: async (productoId: string, nuevasFotos: FotoProducto[]): Promise<void> => {
+    const productoRef = doc(db, 'inventario', productoId);
+    const producto = await getDocs(query(collection(db, 'inventario'), where('__name__', '==', productoId)));
+
+    if (producto.empty) throw new Error('Producto no encontrado');
+
+    const data = producto.docs[0].data() as Producto;
+    const fotosActuales = data.fotos || [];
+
+    // Asignar orden a las nuevas fotos
+    const ordenMaximo = fotosActuales.length > 0
+      ? Math.max(...fotosActuales.map(f => f.orden))
+      : -1;
+
+    const fotosConOrden = nuevasFotos.map((f, i) => ({
+      ...f,
+      orden: ordenMaximo + 1 + i,
+      principal: false // Las fotos adicionales nunca son principales
+    }));
+
+    await updateDoc(productoRef, {
+      fotos: [...fotosActuales, ...fotosConOrden]
+    });
   },
 
   /**
@@ -84,7 +187,7 @@ export const inventarioDB = {
       query(collection(db, 'inventario'), where('disponible', '==', true))
     );
 
-    let productos: Producto[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Producto));
+    let productos: Producto[] = snapshot.docs.map(d => normalizarProducto({ id: d.id, ...d.data() }));
 
     if (filtros?.proveedor) {
       const prov = normalizarTipo(filtros.proveedor);
@@ -108,12 +211,30 @@ export const inventarioDB = {
     return productos;
   },
 
+  /**
+   * Busca un producto por file_id (busca en el array fotos y en el campo legacy).
+   */
   obtenerPorFileId: async (fileId: string): Promise<Producto | null> => {
-    const q = query(collection(db, 'inventario'), where('foto_file_id', '==', fileId));
-    const snap = await getDocs(q);
-    if (snap.empty) return null;
-    const d = snap.docs[0];
-    return { id: d.id, ...d.data() } as Producto;
+    // Buscar en formato nuevo (array fotos)
+    const snapshot = await getDocs(collection(db, 'inventario'));
+    const docs = snapshot.docs;
+
+    for (const d of docs) {
+      const data = d.data();
+      const producto = normalizarProducto({ id: d.id, ...data });
+
+      // Buscar en el array de fotos
+      if (producto.fotos && producto.fotos.some(f => f.file_id === fileId)) {
+        return producto;
+      }
+
+      // Buscar en campo legacy
+      if (data.foto_file_id === fileId) {
+        return producto;
+      }
+    }
+
+    return null;
   },
 
   eliminar: async (id: string): Promise<void> => {

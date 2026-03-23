@@ -1,7 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { env } from '../config/env.js';
-import { Modalidad } from './db.js';
+import { Modalidad, FotoProducto } from './db.js';
 
 // Asegurar que Firebase está inicializado
 const app = getApps().length ? getApps()[0] : initializeApp({
@@ -15,8 +15,11 @@ const app = getApps().length ? getApps()[0] : initializeApp({
 const db = getFirestore(app);
 
 export interface PhotoSession {
-  fileId: string;
-  fileUrl: string;
+  // Soporte para múltiples fotos (media group)
+  fotos?: FotoProducto[];
+  // Campos legacy para compatibilidad
+  fileId?: string;      // Primera foto (compatibilidad)
+  fileUrl?: string;     // URL de la primera foto
   analisis?: { tipos: string[]; descripcion: string; confianza: string };
   tiposManual?: string[];
   descripcionManual?: string;
@@ -27,7 +30,7 @@ export interface PhotoSession {
   precios?: Record<string, string>;
   precio_total?: string;
   modalidad?: Modalidad;
-  esperandoCampo?: 'tipo' | 'proveedor' | 'proveedor_nuevo_confirmar' | 'proveedor_contacto' | 'precio' | 'modalidad' | 'confirmar' | 'editando_campo' | 'codigo_wipe';
+  esperandoCampo?: 'tipo' | 'proveedor' | 'proveedor_nuevo_confirmar' | 'proveedor_contacto' | 'precio' | 'modalidad' | 'confirmar' | 'editando_campo' | 'codigo_wipe' | 'confirmar_fotos';
   campoAEditar?: string;
   updatedAt: number;
 }

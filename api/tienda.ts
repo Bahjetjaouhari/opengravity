@@ -1,23 +1,47 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { inventarioDB, Producto } from '../src/inventory/db.js';
+import { inventarioDB, Producto, FotoProducto } from '../src/inventory/db.js';
 
 export const config = { maxDuration: 30 };
 
 function buildHTML(propios: Producto[], pedidos: Producto[], host: string): string {
   const baseUrl = `https://${host}`;
+  const whatsappNumber = process.env.WHATSAPP_NUMBER || '';
 
-  const cardHTML = (p: Producto) => {
+  const cardHTML = (p: Producto, index: number) => {
     const precio = inventarioDB.getPrecioParaTipo(p);
+    const fotos = inventarioDB.getTodasLasFotos(p);
+    const fotoPrincipal = fotos[0];
     const tipos = p.tipos.map(t =>
       `<span class="badge">${t.charAt(0).toUpperCase() + t.slice(1)}</span>`
     ).join('');
+
+    // Si no hay foto principal, usar placeholder
+    const fotoSrc = fotoPrincipal
+      ? `${baseUrl}/api/photos?id=${fotoPrincipal.file_id}`
+      : 'https://via.placeholder.com/400x400/1a1a2e/9b59b6?text=Sin+Foto';
+
+    // Indicador de múltiples fotos
+    const photoIndicator = fotos.length > 1
+      ? `<div class="photo-count">📷 ${fotos.length}</div>`
+      : '';
+
+    // WhatsApp href
+    const waHref = whatsappNumber
+      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hola! Me interesa ${p.tipos.join(' y ')}${precio !== 'Sin precio' ? ` (${precio})` : ''}. ¿Está disponible?`)}`
+      : '#';
+
+    // Data de todas las fotos para lightbox
+    const fotosDataAttr = JSON.stringify(fotos.map(f => ({ id: f.file_id, url: `${baseUrl}/api/photos?id=${f.file_id}` })));
+    const fotosDataEscaped = fotosDataAttr.replace(/"/g, '&quot;');
+
     return `
-    <div class="card">
-      <div class="card-img-wrap">
-        <img src="${baseUrl}/api/photos?id=${p.foto_file_id}"
+    <div class="card" data-product-index="${index}">
+      <div class="card-img-wrap" onclick="openLightbox(${index}, 0)" data-fotos='${fotosDataEscaped}'>
+        <img src="${fotoSrc}"
              loading="lazy"
              onerror="this.src='https://via.placeholder.com/400x400/1a1a2e/9b59b6?text=OpenGravity'"
              alt="${p.tipos.join(', ')}" />
+        ${photoIndicator}
         <div class="availability-tag ${p.modalidad === 'propio' ? 'tag-now' : 'tag-order'}">
           ${p.modalidad === 'propio' ? '✅ Disponible' : '📦 Por Pedido'}
         </div>
@@ -25,12 +49,24 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       <div class="card-body">
         <div class="tipos">${tipos}</div>
         ${precio !== 'Sin precio' ? `<div class="precio">${precio}</div>` : '<div class="precio-consultar">Precio a consultar</div>'}
-        <a class="btn-contact" href="${process.env.WHATSAPP_NUMBER ? `https://wa.me/${process.env.WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hola! Me interesa ${p.tipos.join(' y ')}${precio !== 'Sin precio' ? ` (${precio})` : ''}. ¿Está disponible?`)}` : '#'}" target="_blank">
-          💬 Consultar
+        <a class="btn-contact ${!whatsappNumber ? 'btn-disabled' : ''}"
+           href="${waHref}"
+           target="_blank"
+           ${!whatsappNumber ? 'onclick="event.preventDefault(); alert(\'WhatsApp no configurado. Contacte al administrador.\')"' : ''}>
+          ${whatsappNumber ? '💬 Consultar' : '⚠️ Sin WhatsApp'}
         </a>
       </div>
     </div>`;
   };
+
+  // Generar datos de productos para lightbox
+  const productosData = [...propios, ...pedidos].map(p => {
+    const fotos = inventarioDB.getTodasLasFotos(p);
+    return fotos.map(f => ({
+      id: f.file_id,
+      url: `${baseUrl}/api/photos?id=${f.file_id}`
+    }));
+  });
 
   return `<!DOCTYPE html>
 <html lang="es">
@@ -128,14 +164,6 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       color: var(--text);
     }
 
-    /* ── COUNTER ── */
-    .counter {
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      padding: 0.6rem 0 0;
-    }
-
     /* ── GRID ── */
     .section { display: none; padding: 1rem 1rem 3rem; }
     .section.visible { display: block; }
@@ -164,6 +192,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       aspect-ratio: 1/1;
       background: #1a1a30;
       overflow: hidden;
+      cursor: zoom-in;
     }
     .card-img-wrap img {
       width: 100%;
@@ -172,6 +201,20 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       transition: transform 0.4s ease;
     }
     .card:hover .card-img-wrap img { transform: scale(1.05); }
+
+    /* Photo count indicator */
+    .photo-count {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(8px);
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #fff;
+    }
 
     .availability-tag {
       position: absolute;
@@ -221,9 +264,78 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       font-weight: 700;
       font-size: 0.85rem;
       text-decoration: none;
-      transition: opacity 0.2s ease;
+      transition: opacity 0.2s ease, filter 0.2s ease;
     }
     .btn-contact:hover { opacity: 0.85; }
+    .btn-contact.btn-disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+
+    /* ── LIGHTBOX ── */
+    .lightbox {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.95);
+      z-index: 1000;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    .lightbox.active { display: flex; }
+    .lightbox-content {
+      position: relative;
+      max-width: 95vw;
+      max-height: 90vh;
+    }
+    .lightbox-img {
+      max-width: 95vw;
+      max-height: 80vh;
+      object-fit: contain;
+      border-radius: 8px;
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 40px;
+      height: 40px;
+      background: rgba(255,255,255,0.1);
+      border: none;
+      border-radius: 50%;
+      color: #fff;
+      font-size: 24px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .lightbox-close:hover { background: rgba(255,255,255,0.2); }
+    .lightbox-nav {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .lightbox-nav button {
+      padding: 0.5rem 1.5rem;
+      background: rgba(123,95,255,0.3);
+      border: 1px solid rgba(123,95,255,0.5);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .lightbox-nav button:hover { background: rgba(123,95,255,0.5); }
+    .lightbox-nav button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .lightbox-counter {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
 
     /* ── EMPTY STATE ── */
     .empty {
@@ -284,7 +396,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 <section class="section visible" id="sec-now">
   ${propios.length > 0 ? `
   <div class="grid">
-    ${propios.map(cardHTML).join('')}
+    ${propios.map((p, i) => cardHTML(p, i)).join('')}
   </div>` : `
   <div class="empty">
     <div class="empty-icon">🛍️</div>
@@ -296,7 +408,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 <section class="section" id="sec-order">
   ${pedidos.length > 0 ? `
   <div class="grid">
-    ${pedidos.map(cardHTML).join('')}
+    ${pedidos.map((p, i) => cardHTML(p, propios.length + i)).join('')}
   </div>` : `
   <div class="empty">
     <div class="empty-icon">📦</div>
@@ -304,11 +416,30 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   </div>`}
 </section>
 
+<!-- LIGHTBOX -->
+<div id="lightbox" class="lightbox" onclick="closeLightbox(event)">
+  <button class="lightbox-close" onclick="closeLightbox(event)">✕</button>
+  <div class="lightbox-content" onclick="event.stopPropagation()">
+    <img id="lightbox-img" class="lightbox-img" src="" alt="Foto del producto" />
+  </div>
+  <div class="lightbox-nav">
+    <button onclick="prevPhoto(event)" id="btn-prev">◀ Anterior</button>
+    <button onclick="nextPhoto(event)" id="btn-next">Siguiente ▶</button>
+  </div>
+  <div class="lightbox-counter" id="lightbox-counter"></div>
+</div>
+
 <footer>
   ⚡ OpenGravity • Catálogo actualizado en tiempo real
 </footer>
 
 <script>
+  // Estado global para lightbox
+  let currentProductIndex = 0;
+  let currentPhotoIndex = 0;
+  let productPhotos = [];
+  const allProducts = ${JSON.stringify(productosData)};
+
   function show(tab) {
     const tabs = document.querySelectorAll('.tab');
     document.getElementById('sec-now').classList.remove('visible');
@@ -323,6 +454,66 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       tabs[1].className = 'tab active-order';
     }
   }
+
+  function openLightbox(productIndex, photoIndex) {
+    currentProductIndex = productIndex;
+    currentPhotoIndex = photoIndex;
+    productPhotos = allProducts[productIndex] || [];
+
+    if (productPhotos.length === 0) return;
+
+    updateLightboxImage();
+    document.getElementById('lightbox').classList.add('active');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox(event) {
+    if (event.target.closest('.lightbox-nav') || event.target.closest('.lightbox-counter')) return;
+    document.getElementById('lightbox').classList.remove('active');
+    document.body.style.overflow = '';
+  }
+
+  function updateLightboxImage() {
+    const photo = productPhotos[currentPhotoIndex];
+    if (!photo) return;
+
+    document.getElementById('lightbox-img').src = photo.url;
+    document.getElementById('lightbox-counter').textContent =
+      productPhotos.length > 1
+        ? \`\${currentPhotoIndex + 1} / \${productPhotos.length}\`
+        : '';
+
+    // Deshabilitar botones si no hay más fotos
+    document.getElementById('btn-prev').disabled = currentPhotoIndex === 0;
+    document.getElementById('btn-next').disabled = currentPhotoIndex === productPhotos.length - 1;
+  }
+
+  function prevPhoto(event) {
+    event.stopPropagation();
+    if (currentPhotoIndex > 0) {
+      currentPhotoIndex--;
+      updateLightboxImage();
+    }
+  }
+
+  function nextPhoto(event) {
+    event.stopPropagation();
+    if (currentPhotoIndex < productPhotos.length - 1) {
+      currentPhotoIndex++;
+      updateLightboxImage();
+    }
+  }
+
+  // Cerrar con Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('lightbox').classList.contains('active')) {
+      document.getElementById('lightbox').classList.remove('active');
+      document.body.style.overflow = '';
+    }
+    // Navegación con flechas
+    if (e.key === 'ArrowLeft') prevPhoto(e);
+    if (e.key === 'ArrowRight') nextPhoto(e);
+  });
 </script>
 </body>
 </html>`;

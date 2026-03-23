@@ -2,13 +2,170 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
-import { inventarioDB, Modalidad, proveedoresDB, adminDB } from '../inventory/db.js';
+import { inventarioDB, Modalidad, proveedoresDB, adminDB, FotoProducto } from '../inventory/db.js';
+
+// Helper para crear array de fotos a partir de sesión legacy o nueva
+function crearFotosDeSession(session: any): FotoProducto[] {
+  // Si ya tiene array de fotos (nuevo formato)
+  if (session.fotos && session.fotos.length > 0) {
+    return session.fotos;
+  }
+  // Fallback a formato legacy (foto_url/foto_file_id)
+  if (session.fileId && session.fileUrl) {
+    return [{
+      file_id: session.fileId,
+      url: session.fileUrl,
+      orden: 0,
+      principal: true
+    }];
+  }
+  return [];
+}
 import { analizarFotoMercancia, generarTextoVenta } from '../inventory/vision.js';
 import { sessionsDB } from '../inventory/sessions.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
+// Escapa caracteres especiales de MarkdownV2 para evitar errores de parseo
+function escapeMd(text: string): string {
+  if (!text) return '';
+  return text.replace(/[_*[\]()~>#+\-=|{}.!\\]/g, '\\$&');
+}
+
 const processedUpdates = new Set<number>();
+
+// ── Sistema de agrupación de fotos (media groups) ─────────────────────────────
+// Cuando el usuario envía múltiples fotos juntas, Telegram las manda como
+// mensajes separados con el mismo media_group_id. Este sistema las agrupa.
+const pendingMediaGroups: Map<string, {
+  fotos: { file_id: string; url: string }[];
+  timer: NodeJS.Timeout;
+  userId: number;
+  caption: string;
+}> = new Map();
+
+const MEDIA_GROUP_TIMEOUT = 2000; // 2 segundos para agrupar fotos
+
+// Función para procesar fotos agrupadas (álbumes)
+async function procesarFotosAgrupadas(
+  ctx: any,
+  fotos: { file_id: string; url: string }[],
+  caption: string
+) {
+  const userId = ctx.from.id;
+
+  // Verificar si es para eliminar
+  if (/\b(vendido|vendida|elimina|eliminar|borrar|agotad[oa])\b/i.test(caption)) {
+    const producto = await inventarioDB.obtenerPorFileId(fotos[0].file_id);
+    if (!producto) return ctx.reply('⚠️ Esta foto no está en el inventario.');
+    await inventarioDB.eliminar(producto.id!);
+    return ctx.reply(`✅ *${producto.tipos.join(' + ')}* (${producto.proveedor}) marcado como VENDIDO y eliminado del inventario.`, { parse_mode: 'Markdown' });
+  }
+
+  const processingMsg = await ctx.reply(
+    fotos.length > 1
+      ? `📸 Analizando ${fotos.length} fotos con IA de visión...`
+      : '📸 Analizando la foto con IA de visión...'
+  );
+
+  // Analizar solo la primera foto para determinar tipo
+  const analisis = await analizarFotoMercancia(fotos[0].url);
+
+  // Extraer proveedor y precio del caption
+  let proveedor: string | undefined;
+  let precio: string | undefined;
+  let modalidadCaption: Modalidad | undefined;
+
+  if (caption) {
+    const precioMatch = caption.match(/\$[\d,.]+|[\d,.]+\s*(bs|bolivares|usd|\$)/i);
+    precio = precioMatch ? precioMatch[0] : undefined;
+    modalidadCaption = /pedido|pedirlo|encargo/i.test(caption) ? 'pedido' : /propio|disponible/i.test(caption) ? 'propio' : undefined;
+    const textoSinPrecio = caption.replace(/\$[\d,.]+|[\d,.]+\s*(bs|bolivares|usd|\$)/gi, '').trim();
+    proveedor = textoSinPrecio ? limpiarProveedor(textoSinPrecio) : undefined;
+  }
+
+  // Crear array de fotos para guardar
+  const fotosParaGuardar: FotoProducto[] = fotos.map((f, i) => ({
+    file_id: f.file_id,
+    url: f.url,
+    orden: i,
+    principal: i === 0
+  }));
+
+  // Decidir desde qué campo arranca el flujo
+  const visionDetecto = analisis?.tipos?.length;
+  let campoInicial: 'tipo'|'proveedor'|'proveedor_nuevo_confirmar'|'precio'|'modalidad'|'confirmar';
+  let esNuevoProveedor = false;
+
+  if (!visionDetecto && !proveedor) campoInicial = 'tipo';
+  else if (!proveedor) campoInicial = 'proveedor';
+  else {
+    const existeProv = await proveedoresDB.obtenerPorNombre(proveedor);
+    if (!existeProv) {
+      esNuevoProveedor = true;
+      campoInicial = 'proveedor_nuevo_confirmar';
+    } else if (modalidadCaption === undefined) {
+      campoInicial = 'precio';
+    } else {
+      campoInicial = 'confirmar';
+    }
+  }
+
+  // Si tenemos todos los datos incluyendo modalidad, guardamos directamente
+  if (!esNuevoProveedor && proveedor && modalidadCaption !== undefined && visionDetecto) {
+    await inventarioDB.agregar({
+      proveedor,
+      tipos: analisis!.tipos,
+      nombre: analisis!.descripcion,
+      precio,
+      fotos: fotosParaGuardar,
+      disponible: true,
+      modalidad: modalidadCaption,
+      fecha_carga: new Date().toISOString()
+    });
+    await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
+    const fotosInfo = fotos.length > 1 ? ` (${fotos.length} fotos)` : '';
+    return ctx.reply(
+      `✅ *Guardado automáticamente:*${fotosInfo}\n🏷️ ${analisis!.tipos.join(' + ')} | 👤 ${proveedor} | 💰 ${precio || 'Sin precio'} | ${modalidadCaption === 'propio' ? '✅ Propio' : '📦 Pedido'}`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  // Iniciamos el flujo interactivo
+  await sessionsDB.set(userId, {
+    fotos: fotosParaGuardar,
+    analisis: analisis || undefined,
+    proveedor,
+    precio,
+    esperandoCampo: campoInicial
+  });
+
+  await ctx.api.deleteMessage(ctx.chat.id, processingMsg.message_id);
+
+  if (campoInicial === 'tipo') {
+    await ctx.reply(
+      `🔍 No pude identificar los artículos en la foto.\n\n` +
+      `🏷️ ¿Qué tipo(s) de artículo(s) hay?\n_Puedes escribir varios separados por coma o "y":_\n*Ej: gorra y franela* o *zapato, pantalon*`,
+      { parse_mode: 'Markdown' }
+    );
+  } else if (campoInicial === 'proveedor') {
+    const td = analisis!.tipos.join(' + ');
+    await ctx.reply(
+      `🔍 *Detecté:* ${td}\n📝 ${analisis!.descripcion} _(confianza: ${analisis!.confianza})_\n\n👤 ¿De qué proveedor es?`,
+      { parse_mode: 'Markdown' }
+    );
+  } else if (campoInicial === 'proveedor_nuevo_confirmar') {
+    await ctx.reply(
+      `🆕 *${proveedor}* parece ser un proveedor nuevo.\n\n¿Quieres registrarlo ahora?`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard().text("Sí, pedir contacto", "prov_si").text("No, continuar", "prov_no")
+      }
+    );
+  } else {
+    await askPrecio(ctx, analisis?.tipos);
+  }
+}
 bot.use(async (ctx, next) => {
   if (ctx.update.update_id && processedUpdates.has(ctx.update.update_id)) {
     console.log(`[Deduplicator] Ignorando update duplicado: ${ctx.update.update_id}`);
@@ -34,7 +191,7 @@ async function askPrecio(ctx: any, tiposA?: string[], tiposM?: string[]) {
   const hint = tipos.length > 1
     ? `_(Ej: ${tipos.map((t,i) => `${t} ${20+i*30}$`).join(' ')}, o el conjunto en 70$)_\n\n`
     : '';
-  await ctx.reply(`💰 ¿Precio?\n${hint}(Escribe el precio o _"sin precio"_)`, { parse_mode: 'Markdown' });
+  await ctx.reply(`💰 ¿Precio?\n${hint}(Escribe el precio o "sin precio")`, { parse_mode: 'Markdown' });
 }
 
 /**
@@ -90,6 +247,7 @@ function parsearPrecios(texto: string, tipos: string[]): {
 }
 
 async function mostrarResumen(ctx: any, session: any) {
+  console.log('[mostrarResumen] Iniciando con sesión:', JSON.stringify(session, null, 2));
   const a = session.analisis;
   const tiposStr = (a?.tipos?.length ? a.tipos : (session.tiposManual || ['artículo']))
     .map((t: string) => `#${t.replace(/\s+/g, '')}`)
@@ -106,6 +264,9 @@ async function mostrarResumen(ctx: any, session: any) {
     precioResumen = session.precio;
   }
 
+  console.log('[mostrarResumen] pCommand:', pCommand, 'desc:', desc, 'precioResumen:', precioResumen);
+
+  // Enviar sin Markdown para evitar errores de parseo
   await ctx.reply(
     `📋 *Resumen:*\n\n` +
     `🏷️ Tipos: ${tiposStr}\n` +
@@ -114,7 +275,6 @@ async function mostrarResumen(ctx: any, session: any) {
     `💰 Precio: ${precioResumen}\n` +
     `📦 Modalidad: ${session.modalidad === 'propio' ? '✅ Propia (stock)' : '📦 Pedido (proveedor)'}`,
     {
-      parse_mode: 'Markdown',
       reply_markup: new InlineKeyboard()
         .text("💾 Guardar", "res_guardar")
         .text("🗑️ Descartar", "res_descartar")
@@ -143,14 +303,14 @@ bot.command('start', ctx => {
     `• /propio – Solo tu stock físico\n` +
     `• /pedido – Solo catálogo por pedido\n` +
     `• /proveedores – Lista de proveedores\n` +
-    `• /p_nombre – Ver contacto y catálogo del proveedor\n` +
+    `• /p\\_nombre – Ver contacto y catálogo del proveedor\n` +
     `• /tipos – Categorías con stock\n` +
     `• /franelas /gorras /zapatos etc. – Catálogo\n` +
     `• /post – Generar publicación WhatsApp/IG\n` +
     `• /stats – Estadísticas del inventario\n` +
     `• /tienda – Link de la tienda pública + QR\n\n` +
     `❌ *Marcado como vendido:*\n` +
-    `• Envía una foto + escribe *"vendido"* junto a ella\n\n` +
+    `• Envía una foto + escribe "vendido" junto a ella\n\n` +
     `💬 También puedes escribirme cualquier cosa para chatear.`,
     { parse_mode: 'Markdown' }
   );
@@ -230,14 +390,16 @@ async function enviarCatalogo(ctx: any, productos: any[], titulo: string) {
   if (productos.length === 0) {
     return ctx.reply(`📭 ${titulo}: Sin productos disponibles.`);
   }
-  await ctx.reply(`📦 *${titulo}* (${productos.length} fotos):`, { parse_mode: 'Markdown' });
+  await ctx.reply(`📦 *${titulo}* (${productos.length} productos):`, { parse_mode: 'Markdown' });
   for (let i = 0; i < productos.length; i += 10) {
     const grupo = productos.slice(i, i + 10);
     const media = grupo.map((p: any) => {
       const pCommand = `/p_${p.proveedor.replace(/\s+/g, '_').toLowerCase()}`;
+      const fotoPrincipal = inventarioDB.getFotoPrincipal(p);
+      const fotoId = fotoPrincipal?.file_id || p.foto_file_id;
       return {
         type: 'photo' as const,
-        media: p.foto_file_id,
+        media: fotoId,
         caption: `*${p.nombre || p.tipos.join(' + ')}*\n🏷️ ${p.tipos.map((t: string) => `#${t.replace(/\s+/g, '')}`).join(' ')} \n👤 ${pCommand} | 💰 ${p.precio || 'Sin precio'} | ${p.modalidad === 'propio' ? '✅ En stock' : '📦 Por pedido'}`,
         parse_mode: 'Markdown' as const
       };
@@ -265,8 +427,9 @@ bot.command('pedido', async ctx => {
 bot.command('proveedores', async ctx => {
   const proveedores = await inventarioDB.listarProveedores();
   if (proveedores.length === 0) return ctx.reply('📭 No hay proveedores registrados.');
+  const lista = proveedores.map(p => `• /p\\_${p.replace(/\s+/g, '\\_').toLowerCase()} - ${p}`).join('\n');
   await ctx.reply(
-    `👥 *Proveedores disponibles:*\n\n${proveedores.map(p => `• /p_${p.replace(/\s+/g, '_').toLowerCase()} - ${p}`).join('\n')}\n\n_Pisa un proveedor para ver su info_`,
+    `👥 *Proveedores disponibles:*\n\n${lista}\n\nPisa un proveedor para ver su info`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -274,8 +437,9 @@ bot.command('proveedores', async ctx => {
 bot.command('tipos', async ctx => {
   const tipos = await inventarioDB.listarTipos();
   if (tipos.length === 0) return ctx.reply('📭 No hay categorías registradas.');
+  const lista = tipos.map(t => `• /${t.replace(/\s+/g, '\\_')}`).join('\n');
   await ctx.reply(
-    `🗂️ *Categorías disponibles:*\n\n${tipos.map(t => `• /${t.replace(/\s+/g, '_')}`).join('\n')}\n\n_Usa /[categoría] para ver el catálogo_`,
+    `🗂️ *Categorías disponibles:*\n\n${lista}\n\nUsa /[categoría] para ver el catálogo`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -294,8 +458,14 @@ bot.command('post', async ctx => {
 
   const producto = productos[Math.floor(Math.random() * productos.length)];
   const texto = await generarTextoVenta(producto);
+  const fotoPrincipal = inventarioDB.getFotoPrincipal(producto);
+  const fotoId = fotoPrincipal?.file_id || producto.foto_file_id;
 
-  await ctx.replyWithPhoto(producto.foto_file_id, {
+  if (!fotoId) {
+    return ctx.reply('⚠️ Este producto no tiene fotos.');
+  }
+
+  await ctx.replyWithPhoto(fotoId, {
     caption: `✅ *Post para WhatsApp/IG:*\n\n${texto}\n\n_📋 Copia y pega en tu estado_`,
     parse_mode: 'Markdown'
   });
@@ -324,7 +494,12 @@ bot.on('message:text', async (ctx, next) => {
     }
 
     if (session.esperandoCampo === 'codigo_wipe') {
-      if (text === '251125') {
+      if (!env.WIPE_DB_PIN) {
+        await ctx.reply('❌ El comando /vaciarbd está deshabilitado. Configura WIPE_DB_PIN en el entorno.');
+        await sessionsDB.delete(userId);
+        return;
+      }
+      if (text === env.WIPE_DB_PIN) {
         const msg = await ctx.reply('⚙️ Vaciando almacén...');
         try {
           await adminDB.vaciarBaseDeDatos();
@@ -371,7 +546,7 @@ bot.on('message:text', async (ctx, next) => {
       // Ignoramos si escriben en vez de usar el botón, o podemos manejarlo
       if (/^s[ií]|yes|claro|dale|afirm/i.test(text)) {
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
-        await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n_(Ej: número de WhatsApp o link de Instagram)_:`, { parse_mode: 'Markdown' });
+        await ctx.reply(`📱 ¡Perfecto! Escribe su método de contacto\n(Ej: número de WhatsApp o link de Instagram):`, { parse_mode: 'Markdown' });
       } else if (/^no|cancel/i.test(text)) {
         await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
         await askPrecio(ctx, session.analisis?.tipos, session.tiposManual);
@@ -478,8 +653,7 @@ bot.on('message:text', async (ctx, next) => {
           precio: session.precio,
           precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
           precio_total: session.precio_total,
-          foto_url: session.fileUrl,
-          foto_file_id: session.fileId,
+          fotos: crearFotosDeSession(session),
           disponible: true,
           modalidad: session.modalidad!,
           fecha_carga: new Date().toISOString()
@@ -488,8 +662,7 @@ bot.on('message:text', async (ctx, next) => {
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
         const precioFinal = session.precio_total || session.precio || 'Sin precio';
         await ctx.reply(
-          `${emoji} *¡Mercancía Almacenada!*\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`,
-          { parse_mode: 'Markdown' }
+          `${emoji} ¡Mercancía Almacenada!\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`
         );
       } else if (/^no|cancel|nope|descarta/i.test(text)) {
         await sessionsDB.delete(userId);
@@ -559,7 +732,7 @@ bot.on('callback_query:data', async ctx => {
   if (session.esperandoCampo === 'proveedor_nuevo_confirmar') {
     if (data === 'prov_si') {
       await sessionsDB.set(userId, { ...session, esperandoCampo: 'proveedor_contacto' });
-      await ctx.editMessageText(`📱 ¡Perfecto! Escribe el método de contacto para *${session.proveedor}*\n_(Ej: número de WhatsApp o link de Instagram)_:`, { parse_mode: 'Markdown' });
+      await ctx.editMessageText(`📱 ¡Perfecto! Escribe el método de contacto para *${escapeMd(session.proveedor || 'proveedor')}*\n(Ej: número de WhatsApp o link de Instagram):`, { parse_mode: 'MarkdownV2' });
       await ctx.answerCallbackQuery();
     } else if (data === 'prov_no') {
       await sessionsDB.set(userId, { ...session, esperandoCampo: 'precio' });
@@ -568,11 +741,21 @@ bot.on('callback_query:data', async ctx => {
       await ctx.answerCallbackQuery();
     }
   } else if (session.esperandoCampo === 'modalidad' && (data === 'mod_propia' || data === 'mod_pedido')) {
+    console.log('[Callback] Modalidad seleccionada:', data);
     const modalidad: Modalidad = data === 'mod_propia' ? 'propio' : 'pedido';
     const updated = { ...session, modalidad, esperandoCampo: 'confirmar' as const };
+    console.log('[Callback] Guardando sesión:', JSON.stringify(updated, null, 2));
     await sessionsDB.set(userId, updated);
+    console.log('[Callback] Sesión guardada, editando mensaje...');
     await ctx.editMessageText(`⏭️ Modalidad seleccionada: ${modalidad === 'propio' ? '📦 Propia (stock)' : '🚚 Pedido (proveedor)'}`);
-    await mostrarResumen(ctx, updated);
+    console.log('[Callback] Llamando mostrarResumen...');
+    try {
+      await mostrarResumen(ctx, updated);
+      console.log('[Callback] mostrarResumen completado');
+    } catch (err: any) {
+      console.error('[Callback ERROR en mostrarResumen]:', err);
+      await ctx.reply(`❌ Error al mostrar resumen: ${err.message}`);
+    }
     await ctx.answerCallbackQuery();
   } else if (session.esperandoCampo === 'confirmar') {
     if (data === 'res_guardar') {
@@ -592,8 +775,7 @@ bot.on('callback_query:data', async ctx => {
           precio: session.precio,
           precios: Object.keys(session.precios || {}).length > 0 ? session.precios : undefined,
           precio_total: session.precio_total,
-          foto_url: session.fileUrl,
-          foto_file_id: session.fileId,
+          fotos: crearFotosDeSession(session),
           disponible: true,
           modalidad: session.modalidad!,
           fecha_carga: new Date().toISOString()
@@ -603,9 +785,9 @@ bot.on('callback_query:data', async ctx => {
         const precioFinal = session.precio_total || session.precio || 'Sin precio';
         await ctx.editMessageText(`✅ Resumen aprobado.`);
         const pCommand = `/p_${session.proveedor!.replace(/\s+/g, '_').toLowerCase()}`;
+        const descripcion = a?.descripcion || session.descripcionManual || tiposFinales.join(' + ');
         await ctx.reply(
-          `${emoji} *¡Mercancía Almacenada!*\n📝 ${a?.descripcion || session.descripcionManual || tiposFinales.join(' + ')}\n👤 ${pCommand} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`,
-          { parse_mode: 'Markdown' }
+          `${emoji} ¡Mercancía Almacenada!\n📝 ${descripcion}\n👤 ${pCommand} | 💰 ${precioFinal}\n\nHa sido guardada correctamente en el inventario.`
         );
         await ctx.answerCallbackQuery('Guardado exitosamente');
       } catch (err: any) {
@@ -654,6 +836,50 @@ bot.on('message:photo', async ctx => {
     const foto = ctx.message.photo[ctx.message.photo.length - 1];
     const fileId = foto.file_id;
     const caption = ctx.message.caption?.trim() || '';
+    const mediaGroupId = ctx.message.media_group_id;
+
+    // ── Detectar si es parte de un álbum de fotos (media_group) ─────────────
+    if (mediaGroupId) {
+      const fileInfo = await ctx.api.getFile(fileId);
+      const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
+
+      // Si ya existe un grupo pendiente, agregar la foto
+      if (pendingMediaGroups.has(mediaGroupId)) {
+        const group = pendingMediaGroups.get(mediaGroupId)!;
+        group.fotos.push({ file_id: fileId, url: fileUrl });
+        // Resetear el timer
+        clearTimeout(group.timer);
+        group.timer = setTimeout(() => {
+          procesarFotosAgrupadas(ctx, group.fotos, group.caption);
+          pendingMediaGroups.delete(mediaGroupId);
+        }, MEDIA_GROUP_TIMEOUT);
+        return; // Esperar a que lleguen todas las fotos
+      }
+
+      // Crear nuevo grupo pendiente
+      const timer = setTimeout(() => {
+        const group = pendingMediaGroups.get(mediaGroupId);
+        if (group) {
+          procesarFotosAgrupadas(ctx, group.fotos, group.caption);
+          pendingMediaGroups.delete(mediaGroupId);
+        }
+      }, MEDIA_GROUP_TIMEOUT);
+
+      pendingMediaGroups.set(mediaGroupId, {
+        fotos: [{ file_id: fileId, url: fileUrl }],
+        timer,
+        userId,
+        caption
+      });
+      return; // Esperar a ver si llegan más fotos
+    }
+
+    // ── Foto individual (no es parte de un álbum) ─────────────────────────────
+    // Procesar normalmente
+    const fotos = [{ file_id: fileId, url: '' }];
+    const fileInfo = await ctx.api.getFile(fileId);
+    const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
+    fotos[0].url = fileUrl;
 
     // ── ¿El usuario envió la foto para eliminar? ─────────────────────────
     if (/\b(vendido|vendida|elimina|eliminar|borrar|agotad[oa])\b/i.test(caption)) {
@@ -662,9 +888,6 @@ bot.on('message:photo', async ctx => {
       await inventarioDB.eliminar(producto.id!);
       return ctx.reply(`✅ *${producto.tipos.join(' + ')}* (${producto.proveedor}) marcado como VENDIDO y eliminado del inventario.`, { parse_mode: 'Markdown' });
     }
-
-    const fileInfo = await ctx.api.getFile(fileId);
-    const fileUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
 
     const processingMsg = await ctx.reply('📸 Analizando la foto con IA de visión...');
     const analisis = await analizarFotoMercancia(fileUrl);
@@ -708,8 +931,7 @@ bot.on('message:photo', async ctx => {
         tipos: analisis!.tipos,
         nombre: analisis!.descripcion,
         precio,
-        foto_url: fileUrl,
-        foto_file_id: fileId,
+        fotos: [{ file_id: fileId, url: fileUrl, orden: 0, principal: true }],
         disponible: true,
         modalidad: modalidadCaption,
         fecha_carga: new Date().toISOString()
@@ -725,6 +947,7 @@ bot.on('message:photo', async ctx => {
     await sessionsDB.set(userId, {
       fileId,
       fileUrl,
+      fotos: [{ file_id: fileId, url: fileUrl, orden: 0, principal: true }],
       analisis: analisis || undefined,
       proveedor,
       precio,

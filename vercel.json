@@ -5,6 +5,22 @@
       "schedule": "0 9 * * *"
     }
   ],
+  "rewrites": [
+    {
+      "source": "/tienda",
+      "destination": "/api/tienda"
+    },
+    {
+      "source": "/tienda/",
+      "destination": "/api/tienda"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/tienda",
+      "dest": "/api/tienda"
+    }
+  ],
   "headers": [
     {
       "source": "/api/tienda",
