@@ -60,7 +60,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     log('Procesando con bot.handleUpdate...');
 
     // Usar handleUpdate directamente (sin webhookCallback)
-    await bot.handleUpdate(fakeUpdate);
+    // Cast to any porque es un update parcial para testing
+    await bot.handleUpdate(fakeUpdate as any);
 
     log('Handler completado exitosamente!');
 
