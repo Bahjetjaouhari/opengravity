@@ -197,9 +197,10 @@ async function askPrecio(ctx: any, tiposA?: string[], tiposM?: string[]) {
 /**
  * Parsea el texto de precio y extrae precios individuales por tipo.
  * Ejemplos:
- *   "gorra 20$ franela 50$"  → { precios: {gorra:"$20", franela:"$50"}, total:"$70" }
+ *   "gorra 20$ franela 50$"  → { precios: {gorra:"$20", franela:"$50"}, precio_total:"$70" }
  *   "75$" o "conjunto 75$"   → { precios: {}, precio: "$75" }
- *   "gorra $20"              → { precios: {gorra:"$20"}, total: "$20" }
+ *   "gorra $20"              → { precios: {gorra:"$20"}, precio_total: "$20" }
+ *   "gorra 40 franela 50 conjunto 80" → { precios: {gorra:"$40", franela:"$50"}, precio_total: "$80" }
  */
 function parsearPrecios(texto: string, tipos: string[]): {
   precios: Record<string, string>;
@@ -207,6 +208,15 @@ function parsearPrecios(texto: string, tipos: string[]): {
   precio?: string;  // precio único si no se desglosaron
 } {
   const precios: Record<string, string> = {};
+  let precioConjunto: string | undefined;
+
+  // Detectar precio de conjunto explícito (conjunto X, total X, todo X)
+  const conjuntoMatch = texto.match(/(?:conjunto|total|todo)\s*[,:]?\s*(\$?[\d,.]+|[\d,.]+\s*\$?)/i);
+  if (conjuntoMatch) {
+    let val = conjuntoMatch[1].trim();
+    if (!val.includes('$')) val = '$' + val;
+    precioConjunto = val;
+  }
 
   // Detectamos si el texto tiene precios por tipo
   for (const tipo of tipos) {
@@ -223,13 +233,22 @@ function parsearPrecios(texto: string, tipos: string[]): {
     }
   }
 
-  // Si encontramos precios individuales para todos los tipos, calculamos total
-  if (Object.keys(precios).length === tipos.length && tipos.length > 1) {
-    const total = Object.values(precios).reduce((sum, p) => {
-      const num = parseFloat(p.replace(/[$,]/g, ''));
-      return sum + (isNaN(num) ? 0 : num);
-    }, 0);
-    return { precios, precio_total: `$${total.toFixed(2).replace('.00', '')}` };
+  // Si encontramos precios individuales
+  if (Object.keys(precios).length > 0) {
+    // Si hay precio de conjunto explícito, usarlo
+    if (precioConjunto) {
+      return { precios, precio_total: precioConjunto };
+    }
+    // Si hay precios para todos los tipos, calcular total
+    if (Object.keys(precios).length === tipos.length && tipos.length > 1) {
+      const total = Object.values(precios).reduce((sum, p) => {
+        const num = parseFloat(p.replace(/[$,]/g, ''));
+        return sum + (isNaN(num) ? 0 : num);
+      }, 0);
+      return { precios, precio_total: `$${total.toFixed(2).replace('.00', '')}` };
+    }
+    // Precios parciales
+    return { precios, precio_total: undefined };
   }
 
   // Si solo hay un tipo o no se desglosaron, buscamos un precio general

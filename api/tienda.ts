@@ -66,6 +66,57 @@ function getPrecioParaTipo(producto: Producto, tipo?: string): string {
   return producto.precio_total || producto.precio || 'Sin precio';
 }
 
+/**
+ * Genera el HTML de precios con desglose si hay múltiples precios.
+ * Si hay precios individuales + precio de conjunto, muestra ambos.
+ * Si solo hay precios individuales, muestra el desglose.
+ */
+function getPrecioHTML(producto: Producto): string {
+  // Si hay precios individuales
+  if (producto.precios && Object.keys(producto.precios).length > 0) {
+    const entries = Object.entries(producto.precios);
+
+    // Si hay precio de conjunto (diferente a la suma o explícito)
+    if (producto.precio_total) {
+      const desglose = entries.map(([tipo, precio]) => {
+        const tipoCap = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+        return `<span class="precio-item">${tipoCap}: ${precio}</span>`;
+      }).join('');
+
+      // Calcular la suma para mostrar ahorro
+      const suma = entries.reduce((acc, [, p]) => {
+        const num = parseFloat(p.replace(/[$,]/g, ''));
+        return acc + (isNaN(num) ? 0 : num);
+      }, 0);
+      const precioTotal = parseFloat(producto.precio_total.replace(/[$,]/g, '') || '0');
+      const ahorro = suma - precioTotal;
+      const ahorroHTML = ahorro > 0 ? `<span class="precio-ahorro">¡Ahorras $${ahorro}!</span>` : '';
+
+      return `
+        <div class="precio-desglose">
+          <div class="precio-items">${desglose}</div>
+          <div class="precio-conjunto">
+            <span class="precio-total-label">Conjunto:</span>
+            <span class="precio-total-value">${producto.precio_total}</span>
+            ${ahorroHTML}
+          </div>
+        </div>`;
+    }
+
+    // Solo precios individuales (sin precio de conjunto)
+    const desglose = entries.map(([tipo, precio]) => {
+      const tipoCap = tipo.charAt(0).toUpperCase() + tipo.slice(1);
+      return `<span class="precio-item">${tipoCap}: ${precio}</span>`;
+    }).join('');
+
+    return `<div class="precio-desglose"><div class="precio-items">${desglose}</div></div>`;
+  }
+
+  // Precio único
+  const precio = producto.precio || 'Sin precio';
+  return `<div class="precio">${precio}</div>`;
+}
+
 function getTodasLasFotos(producto: Producto): FotoProducto[] {
   if (producto.fotos && producto.fotos.length > 0) {
     return [...producto.fotos].sort((a, b) => a.orden - b.orden);
@@ -97,7 +148,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   const whatsappNumber = process.env.WHATSAPP_NUMBER || '';
 
   const cardHTML = (p: Producto, index: number) => {
-    const precio = getPrecioParaTipo(p);
+    const precioHTML = getPrecioHTML(p);
     const fotos = getTodasLasFotos(p);
     const fotoPrincipal = fotos[0];
     const tipos = p.tipos.map(t =>
@@ -114,9 +165,12 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       ? `<div class="photo-count">📷 ${fotos.length}</div>`
       : '';
 
+    // Precio para WhatsApp (usar el más relevante)
+    const precioParaWhatsApp = getPrecioParaTipo(p);
+
     // WhatsApp href
     const waHref = whatsappNumber
-      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hola! Me interesa ${p.tipos.join(' y ')}${precio !== 'Sin precio' ? ` (${precio})` : ''}. ¿Está disponible?`)}`
+      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hola! Me interesa ${p.tipos.join(' y ')}${precioParaWhatsApp !== 'Sin precio' ? ` (${precioParaWhatsApp})` : ''}. ¿Está disponible?`)}`
       : '#';
 
     // Data de todas las fotos para lightbox
@@ -137,7 +191,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       </div>
       <div class="card-body">
         <div class="tipos">${tipos}</div>
-        ${precio !== 'Sin precio' ? `<div class="precio">${precio}</div>` : '<div class="precio-consultar">Precio a consultar</div>'}
+        ${precioHTML}
         <a class="btn-contact ${!whatsappNumber ? 'btn-disabled' : ''}"
            href="${waHref}"
            target="_blank"
@@ -342,6 +396,45 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       font-size: 0.82rem;
       color: var(--text-muted);
       font-style: italic;
+    }
+    .precio-desglose {
+      margin-top: 0.3rem;
+    }
+    .precio-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .precio-item {
+      background: rgba(255,255,255,0.05);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .precio-conjunto {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .precio-total-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .precio-total-value {
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: var(--now);
+    }
+    .precio-ahorro {
+      font-size: 0.7rem;
+      color: #f59e0b;
+      background: rgba(245,158,11,0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
     }
     .btn-contact {
       display: block;
