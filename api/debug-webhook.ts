@@ -24,8 +24,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Try to import the bot
   try {
     const { bot } = await import('../src/bot/telegram.js');
+    await bot.init(); // Necesario para obtener botInfo en grammy
     diagnostics.bot_import = '✅ Importado correctamente';
-    diagnostics.bot_info = bot.botInfo ? 'Bot info disponible' : 'Sin bot info';
+    diagnostics.bot_info = {
+      username: bot.botInfo?.username ?? 'desconocido',
+      id: bot.botInfo?.id ?? 'desconocido',
+    };
   } catch (error: any) {
     diagnostics.bot_import = '❌ Error al importar';
     diagnostics.bot_error = {
