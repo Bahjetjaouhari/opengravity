@@ -2,7 +2,7 @@ import { Bot, InputFile, InlineKeyboard } from 'grammy';
 import { env } from '../config/env.js';
 import { processUserMessage } from '../agent/loop.js';
 import { transcribeAudioUrl, generateSpeechElevenLabs } from '../audio/services.js';
-import { inventarioDB, Modalidad, proveedoresDB, adminDB, FotoProducto } from '../inventory/db.js';
+import { inventarioDB, Modalidad, proveedoresDB, adminDB, FotoProducto, Producto } from '../inventory/db.js';
 
 // Helper para crear array de fotos a partir de sesión legacy o nueva
 function crearFotosDeSession(session: any): FotoProducto[] {
@@ -519,6 +519,29 @@ bot.command('post', async ctx => {
   });
 });
 
+// ── /editar – Editar productos existentes ─────────────────────────────────────
+bot.command('editar', async ctx => {
+  const productos = await inventarioDB.obtener();
+  if (productos.length === 0) return ctx.reply('📭 No hay productos en el inventario.');
+
+  // Mostrar los últimos 8 productos con botones
+  const ultimos = productos.slice(-8).reverse();
+  const botones = ultimos.map(p => {
+    const tipos = p.tipos.join(' + ');
+    const precio = formatearPrecio(p.precio_total || p.precio);
+    const texto = `${tipos.slice(0, 20)}${tipos.length > 20 ? '...' : ''} | ${precio}`;
+    return [InlineKeyboard.text(texto, `edit_${p.id}`)];
+  });
+
+  await ctx.reply(
+    `✏️ *Editar producto*\n\nSelecciona el producto que quieres editar:`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: new InlineKeyboard(botones as any)
+    }
+  );
+});
+
 // ── Mensajes de texto ──────────────────────────────────────────────────────
 bot.on('message:text', async (ctx, next) => {
   const text = ctx.message.text.trim();
@@ -539,6 +562,56 @@ bot.on('message:text', async (ctx, next) => {
         return next();
       }
       // Para el confirmar, si envían otro texto que no es sí/no mostramos ayuda
+    }
+
+    // ── Edición de productos existentes ────────────────────────────────────────
+    if (session.productoEditandoId && session.campoEditando) {
+      const producto = await inventarioDB.obtener().then(ps => ps.find(p => p.id === session.productoEditandoId));
+      if (!producto) {
+        await ctx.reply('❌ Producto no encontrado. Usa /editar para comenzar de nuevo.');
+        await sessionsDB.delete(userId);
+        return;
+      }
+
+      const campo = session.campoEditando;
+      let actualizaciones: Partial<Producto> = {};
+
+      if (campo === 'tipos') {
+        const partes = text.replace(/\s+(y|e)\s+/gi, ',').split(/[,&+]/).map(t => t.trim().toLowerCase()).filter(Boolean);
+        const tipos = partes.map(t => t.replace(/\s+/g, ''));
+        actualizaciones.tipos = tipos;
+        actualizaciones.nombre = tipos.join(' + ');
+      } else if (campo === 'precio') {
+        if (/sin precio/i.test(text)) {
+          actualizaciones.precio = undefined;
+          actualizaciones.precios = undefined;
+          actualizaciones.precio_total = undefined;
+        } else {
+          const tiposActuales = producto.tipos;
+          const parsed = parsearPrecios(text, tiposActuales);
+          actualizaciones.precios = Object.keys(parsed.precios || {}).length > 0 ? parsed.precios : undefined;
+          actualizaciones.precio_total = parsed.precio_total;
+          actualizaciones.precio = parsed.precio;
+        }
+      } else if (campo === 'proveedor') {
+        actualizaciones.proveedor = limpiarProveedor(text);
+      }
+
+      await inventarioDB.actualizar(producto.id!, actualizaciones);
+      await sessionsDB.delete(userId);
+
+      const tiposActualizados = actualizaciones.tipos || producto.tipos;
+      const precioActualizado = actualizaciones.precio_total || actualizaciones.precio || producto.precio_total || producto.precio;
+      const precioFinal = formatearPrecio(precioActualizado);
+
+      await ctx.reply(
+        `✅ *Producto actualizado*\n\n` +
+        `🏷️ Tipos: ${tiposActualizados.join(' + ')}\n` +
+        `💰 Precio: ${precioFinal}\n\n` +
+        `Usa /editar para hacer más cambios.`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
     }
 
     if (session.esperandoCampo === 'codigo_wipe') {
@@ -772,6 +845,96 @@ bot.on('callback_query:data', async ctx => {
   const userId = ctx.from.id;
   const session = await sessionsDB.get(userId);
 
+  // ── Selección de producto para editar (desde /editar) ───────────────────────
+  if (data.startsWith('editprod_')) {
+    const productoId = data.replace('editprod_', '');
+    const producto = await inventarioDB.obtener().then(ps => ps.find(p => p.id === productoId));
+    if (!producto) {
+      await ctx.answerCallbackQuery({ text: 'Producto no encontrado', show_alert: true });
+      return;
+    }
+
+    const tipos = producto.tipos.join(' + ');
+    const precio = formatearPrecio(producto.precio_total || producto.precio);
+    const modalidad = producto.modalidad === 'propio' ? '✅ Propio' : '📦 Pedido';
+
+    await ctx.editMessageText(
+      `✏️ *Editando:*\n\n` +
+      `🏷️ Tipos: ${tipos}\n` +
+      `👤 Proveedor: ${producto.proveedor}\n` +
+      `💰 Precio: ${precio}\n` +
+      `📦 Modalidad: ${modalidad}\n\n` +
+      `¿Qué quieres editar?`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: new InlineKeyboard()
+          .text("🏷️ Tipos", `editcampo_${productoId}_tipos`)
+          .text("💰 Precio", `editcampo_${productoId}_precio`)
+          .row()
+          .text("👤 Proveedor", `editcampo_${productoId}_proveedor`)
+          .text("📦 Modalidad", `editcampo_${productoId}_modalidad`)
+          .row()
+          .text("❌ Cancelar", "edit_cancelar")
+      }
+    );
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  // ── Selección de campo a editar ────────────────────────────────────────────
+  if (data.startsWith('editcampo_')) {
+    const [_, productoId, campo] = data.split('_');
+    const campoValido = ['tipos', 'precio', 'proveedor', 'modalidad'].includes(campo)
+      ? campo as 'tipos' | 'precio' | 'proveedor' | 'modalidad'
+      : undefined;
+
+    if (!campoValido) {
+      await ctx.answerCallbackQuery({ text: 'Campo no válido', show_alert: true });
+      return;
+    }
+
+    await sessionsDB.set(userId, { productoEditandoId: productoId, campoEditando: campoValido });
+
+    let mensaje = '';
+    if (campo === 'tipos') mensaje = '🏷️ Escribe los nuevos tipos (separados por coma):';
+    else if (campo === 'precio') mensaje = '💰 Escribe el nuevo precio (ej: "gorra 40 franela 50 conjunto 140" o "50"):';
+    else if (campo === 'proveedor') mensaje = '👤 Escribe el nuevo proveedor:';
+    else if (campo === 'modalidad') mensaje = '📦 Selecciona la modalidad:';
+
+    if (campo === 'modalidad') {
+      await ctx.editMessageText(mensaje, {
+        reply_markup: new InlineKeyboard()
+          .text("✅ Propio (stock)", `editmod_${productoId}_propio`)
+          .text("📦 Por pedido", `editmod_${productoId}_pedido`)
+          .row()
+          .text("❌ Cancelar", "edit_cancelar")
+      });
+    } else {
+      await ctx.editMessageText(mensaje);
+    }
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  // ── Cambiar modalidad directamente ─────────────────────────────────────────
+  if (data.startsWith('editmod_')) {
+    const [_, productoId, modalidad] = data.split('_');
+    await inventarioDB.actualizar(productoId, { modalidad: modalidad as Modalidad });
+    await ctx.editMessageText(`✅ Modalidad actualizada a *${modalidad === 'propio' ? 'Propio' : 'Por pedido'}*`, { parse_mode: 'Markdown' });
+    await sessionsDB.delete(userId);
+    await ctx.answerCallbackQuery('Actualizado');
+    return;
+  }
+
+  // ── Cancelar edición ────────────────────────────────────────────────────────
+  if (data === 'edit_cancelar') {
+    await sessionsDB.delete(userId);
+    await ctx.editMessageText('❌ Edición cancelada.');
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  // ── Flujo normal de sesión ──────────────────────────────────────────────────
   if (!session) {
     await ctx.answerCallbackQuery({ text: '⏳ La sesión expiró o ya fue completada.', show_alert: true });
     return;

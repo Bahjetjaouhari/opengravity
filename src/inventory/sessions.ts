@@ -32,6 +32,9 @@ export interface PhotoSession {
   modalidad?: Modalidad;
   esperandoCampo?: 'tipo' | 'proveedor' | 'proveedor_nuevo_confirmar' | 'proveedor_contacto' | 'precio' | 'modalidad' | 'confirmar' | 'editando_campo' | 'codigo_wipe' | 'confirmar_fotos';
   campoAEditar?: string;
+  // Para edición de productos existentes
+  productoEditandoId?: string;
+  campoEditando?: 'tipos' | 'precio' | 'proveedor' | 'modalidad';
   updatedAt: number;
 }
 

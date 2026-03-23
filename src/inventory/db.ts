@@ -253,6 +253,14 @@ export const inventarioDB = {
     return [...new Set(todosLosTipos)].sort();
   },
 
+  /**
+   * Actualiza campos específicos de un producto.
+   */
+  actualizar: async (id: string, campos: Partial<Producto>): Promise<void> => {
+    const productoRef = doc(db, 'inventario', id);
+    await updateDoc(productoRef, campos);
+  },
+
   obtenerAleatorio: async (filtros?: { modalidad?: Modalidad }): Promise<Producto | null> => {
     const productos = await inventarioDB.obtener(filtros);
     if (productos.length === 0) return null;
