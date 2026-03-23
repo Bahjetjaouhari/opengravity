@@ -67,6 +67,16 @@ function getPrecioParaTipo(producto: Producto, tipo?: string): string {
 }
 
 /**
+ * Formatea un precio para mostrar: $70 → REF 70
+ */
+function formatearPrecio(precio: string): string {
+  if (!precio || precio === 'Sin precio') return 'Sin precio';
+  // Quitar $ y agregar REF
+  const num = precio.replace(/[$,]/g, '');
+  return `REF ${num}`;
+}
+
+/**
  * Genera el HTML de precios con desglose si hay múltiples precios.
  * Si hay precios individuales + precio de conjunto, muestra ambos.
  * Si solo hay precios individuales, muestra el desglose.
@@ -80,7 +90,7 @@ function getPrecioHTML(producto: Producto): string {
     if (producto.precio_total) {
       const desglose = entries.map(([tipo, precio]) => {
         const tipoCap = tipo.charAt(0).toUpperCase() + tipo.slice(1);
-        return `<span class="precio-item">${tipoCap}: ${precio}</span>`;
+        return `<span class="precio-item">${tipoCap}: ${formatearPrecio(precio)}</span>`;
       }).join('');
 
       // Calcular la suma para mostrar ahorro
@@ -90,14 +100,14 @@ function getPrecioHTML(producto: Producto): string {
       }, 0);
       const precioTotal = parseFloat(producto.precio_total.replace(/[$,]/g, '') || '0');
       const ahorro = suma - precioTotal;
-      const ahorroHTML = ahorro > 0 ? `<span class="precio-ahorro">¡Ahorras $${ahorro}!</span>` : '';
+      const ahorroHTML = ahorro > 0 ? `<span class="precio-ahorro">¡Ahorras REF ${ahorro}!</span>` : '';
 
       return `
         <div class="precio-desglose">
           <div class="precio-items">${desglose}</div>
           <div class="precio-conjunto">
             <span class="precio-total-label">Conjunto:</span>
-            <span class="precio-total-value">${producto.precio_total}</span>
+            <span class="precio-total-value">${formatearPrecio(producto.precio_total)}</span>
             ${ahorroHTML}
           </div>
         </div>`;
@@ -106,7 +116,7 @@ function getPrecioHTML(producto: Producto): string {
     // Solo precios individuales (sin precio de conjunto)
     const desglose = entries.map(([tipo, precio]) => {
       const tipoCap = tipo.charAt(0).toUpperCase() + tipo.slice(1);
-      return `<span class="precio-item">${tipoCap}: ${precio}</span>`;
+      return `<span class="precio-item">${tipoCap}: ${formatearPrecio(precio)}</span>`;
     }).join('');
 
     return `<div class="precio-desglose"><div class="precio-items">${desglose}</div></div>`;
@@ -114,7 +124,7 @@ function getPrecioHTML(producto: Producto): string {
 
   // Precio único
   const precio = producto.precio || 'Sin precio';
-  return `<div class="precio">${precio}</div>`;
+  return `<div class="precio">${formatearPrecio(precio)}</div>`;
 }
 
 function getTodasLasFotos(producto: Producto): FotoProducto[] {

@@ -32,6 +32,13 @@ function escapeMd(text: string): string {
   return text.replace(/[_*[\]()~>#+\-=|{}.!\\]/g, '\\$&');
 }
 
+// Formatea un precio para mostrar: $70 → REF 70
+function formatearPrecio(precio: string | undefined): string {
+  if (!precio || precio === 'Sin precio') return 'Sin precio';
+  const num = precio.replace(/[$,]/g, '');
+  return `REF ${num}`;
+}
+
 const processedUpdates = new Set<number>();
 
 // ── Sistema de agrupación de fotos (media groups) ─────────────────────────────
@@ -277,10 +284,10 @@ async function mostrarResumen(ctx: any, session: any) {
   const precios = session.precios || {};
   let precioResumen = 'Sin precio';
   if (Object.keys(precios).length > 0) {
-    const desglose = Object.entries(precios).map(([t, p]) => `${t}: ${p}`).join(', ');
-    precioResumen = session.precio_total ? `${session.precio_total} (${desglose})` : desglose;
+    const desglose = Object.entries(precios).map(([t, p]) => `${t}: ${formatearPrecio(p as string)}`).join(', ');
+    precioResumen = session.precio_total ? `${formatearPrecio(session.precio_total)} (${desglose})` : desglose;
   } else if (session.precio) {
-    precioResumen = session.precio;
+    precioResumen = formatearPrecio(session.precio);
   }
 
   console.log('[mostrarResumen] pCommand:', pCommand, 'desc:', desc, 'precioResumen:', precioResumen);
@@ -664,7 +671,7 @@ bot.on('message:text', async (ctx, next) => {
     `🏷️ Tipos: ${tiposStr}\n` +
     `📝 ${desc}\n` +
     `👤 Proveedor: ${pCommand}\n` +
-    `💰 Precio: ${session.precio_total || session.precio || 'Sin precio'}\n`;
+    `💰 Precio: ${formatearPrecio(session.precio_total || session.precio)}\n`;
         await inventarioDB.agregar({
           proveedor: session.proveedor!,
           tipos: tiposFinales,
@@ -679,7 +686,7 @@ bot.on('message:text', async (ctx, next) => {
         });
         await sessionsDB.delete(userId);
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
-        const precioFinal = session.precio_total || session.precio || 'Sin precio';
+        const precioFinal = formatearPrecio(session.precio_total || session.precio);
         await ctx.reply(
           `${emoji} ¡Mercancía Almacenada!\n🏷️ ${tiposFinales.join(' + ')} | 👤 ${session.proveedor} | 💰 ${precioFinal}`
         );
@@ -801,7 +808,7 @@ bot.on('callback_query:data', async ctx => {
         });
         await sessionsDB.delete(userId);
         const emoji = session.modalidad === 'propio' ? '✅' : '📦';
-        const precioFinal = session.precio_total || session.precio || 'Sin precio';
+        const precioFinal = formatearPrecio(session.precio_total || session.precio);
         await ctx.editMessageText(`✅ Resumen aprobado.`);
         const pCommand = `/p_${session.proveedor!.replace(/\s+/g, '_').toLowerCase()}`;
         const descripcion = a?.descripcion || session.descripcionManual || tiposFinales.join(' + ');
