@@ -530,7 +530,7 @@ bot.command('editar', async ctx => {
     const tipos = p.tipos.join(' + ');
     const precio = formatearPrecio(p.precio_total || p.precio);
     const texto = `${tipos.slice(0, 20)}${tipos.length > 20 ? '...' : ''} | ${precio}`;
-    return [InlineKeyboard.text(texto, `edit_${p.id}`)];
+    return [InlineKeyboard.text(texto, `editprod_${p.id}`)];
   });
 
   await ctx.reply(
