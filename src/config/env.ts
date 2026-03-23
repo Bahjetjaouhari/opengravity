@@ -32,9 +32,10 @@ export const env = {
   WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || ''
 };
 
-// Basic Validation
+// Basic Validation - Updated 2026-03-23 v2
 if (!env.TELEGRAM_BOT_TOKEN) throw new Error('El TELEGRAM_BOT_TOKEN es necesario. Revisa tu .env.');
 if (env.TELEGRAM_ALLOWED_USER_IDS.length === 0) throw new Error('TELEGRAM_ALLOWED_USER_IDS no es válido o está vacío.');
-// DEEPGRAM_API_KEY es opcional - solo se necesita para transcripción de audio
-if (!env.DEEPGRAM_API_KEY) console.warn('[Config] DEEPGRAM_API_KEY no configurado - transcripción de audio deshabilitada.');
+// DEEPGRAM: La API key es OPCIONAL. Solo se necesita para transcripción de voz.
+// Si no está configurada, la transcripción de audio no funcionará pero el bot seguirá operativo.
+const _deepgramWarning = env.DEEPGRAM_API_KEY ? null : console.warn('[Config] DEEPGRAM_API_KEY no configurado');
 if (!env.WIPE_DB_PIN) console.warn('[Config] WIPE_DB_PIN no configurado - comando /vaciarbd deshabilitado.');
