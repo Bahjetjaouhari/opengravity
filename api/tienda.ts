@@ -178,13 +178,14 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     // Precio para WhatsApp (usar el más relevante)
     const precioParaWhatsApp = getPrecioParaTipo(p);
 
-    // URL de la foto principal para WhatsApp
-    const fotoUrl = fotoPrincipal
-      ? `${baseUrl}/api/photos?id=${fotoPrincipal.file_id}`
+    // URL de la foto principal para WhatsApp - usar página de preview
+    const nombreProducto = p.tipos.join(' + ');
+    const fotoPreviewUrl = fotoPrincipal
+      ? `${baseUrl}/api/producto-preview?id=${encodeURIComponent(fotoPrincipal.file_id)}&nombre=${encodeURIComponent(nombreProducto)}&precio=${encodeURIComponent(precioParaWhatsApp)}`
       : '';
 
-    // WhatsApp href - incluye enlace a la foto
-    const mensajeWhatsApp = `Hola! Me interesa ${p.tipos.join(' y ')}${precioParaWhatsApp !== 'Sin precio' ? ` (${precioParaWhatsApp})` : ''}. ¿Está disponible?${fotoUrl ? `\n\n📷 Foto: ${fotoUrl}` : ''}`;
+    // WhatsApp href - incluye enlace a la página de preview
+    const mensajeWhatsApp = `Hola! Me interesa ${p.tipos.join(' y ')}${precioParaWhatsApp !== 'Sin precio' ? ` (${precioParaWhatsApp})` : ''}. ¿Está disponible?${fotoPreviewUrl ? `\n\n${fotoPreviewUrl}` : ''}`;
     const waHref = whatsappNumber
       ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(mensajeWhatsApp)}`
       : '#';
