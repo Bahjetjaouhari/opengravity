@@ -1,33 +1,24 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+
 /**
  * Endpoint para registrar el webhook en Telegram.
- * Llamar una sola vez después de desplegar en Vercel.
- *
  * Uso: GET /api/set-webhook
  */
+export const config = { maxDuration: 30 };
 
-export default async function handler(req: Request) {
-  // Verificar que sea un GET request
-  if (req.method !== "GET") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { "Content-Type": "application/json" },
-    });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     const token = process.env.TELEGRAM_BOT_TOKEN;
 
     if (!token) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "TELEGRAM_BOT_TOKEN no está configurado en Vercel",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return res.status(500).json({
+        success: false,
+        error: 'TELEGRAM_BOT_TOKEN no está configurado en Vercel',
+      });
     }
 
     // Obtener la URL del webhook
@@ -41,29 +32,23 @@ export default async function handler(req: Request) {
     } else if (vercelUrl) {
       baseUrl = `https://${vercelUrl}`;
     } else {
-      return new Response(
-        JSON.stringify({
-          error: "No se puede determinar la URL del webhook",
-          hint: "Agrega WEBHOOK_URL en las variables de entorno de Vercel",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return res.status(500).json({
+        error: 'No se puede determinar la URL del webhook',
+        hint: 'Agrega WEBHOOK_URL en las variables de entorno de Vercel',
+      });
     }
 
     const fullWebhookUrl = `${baseUrl}/api/webhook`;
 
-    // Llamada directa a la API de Telegram (sin depender del bot)
+    // Llamada directa a la API de Telegram
     const response = await fetch(
       `https://api.telegram.org/bot${token}/setWebhook`,
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: fullWebhookUrl,
-          allowed_updates: ["message", "edited_message", "callback_query"],
+          allowed_updates: ['message', 'edited_message', 'callback_query'],
         }),
       }
     );
@@ -71,44 +56,25 @@ export default async function handler(req: Request) {
     const result = await response.json();
 
     if (result.ok) {
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: "✅ Webhook registrado exitosamente",
-          webhook_url: fullWebhookUrl,
-          telegram_response: result,
-          instructions:
-            "Tu bot ahora funcionará 24/7. Apaga tu PC y prueba enviar un mensaje al bot.",
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return res.status(200).json({
+        success: true,
+        message: '✅ Webhook registrado exitosamente',
+        webhook_url: fullWebhookUrl,
+        telegram_response: result,
+        instructions: 'Tu bot ahora funcionará 24/7. Apaga tu PC y prueba enviar un mensaje al bot.',
+      });
     } else {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Telegram rechazó el registro del webhook",
-          telegram_response: result,
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return res.status(500).json({
+        success: false,
+        error: 'Telegram rechazó el registro del webhook',
+        telegram_response: result,
+      });
     }
   } catch (error) {
-    console.error("Error registrando webhook:", error);
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: error instanceof Error ? error.message : "Error desconocido",
-      }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+    console.error('Error registrando webhook:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    });
   }
 }
