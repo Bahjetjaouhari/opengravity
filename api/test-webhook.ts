@@ -37,13 +37,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await bot.init();
     log(`Bot inicializado: @${bot.botInfo?.username}`);
 
-    // 4. Importar y crear webhookCallback
-    log('Creando webhook callback...');
-    const { webhookCallback } = await import('grammy');
-    const handleUpdate = webhookCallback(bot, 'http');
-    log('Webhook callback creado');
-
-    // 5. Simular update
+    // 4. Simular update
     const fakeUpdate = {
       update_id: 999999,
       message: {
@@ -63,39 +57,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     log(`Enviando update de prueba: ${JSON.stringify(fakeUpdate)}`);
+    log('Procesando con bot.handleUpdate...');
 
-    // Crear objetos mock de req/res
-    const mockReq = {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: fakeUpdate,
-      url: '/api/webhook',
-    } as unknown as VercelRequest;
+    // Usar handleUpdate directamente (sin webhookCallback)
+    await bot.handleUpdate(fakeUpdate);
 
-    // Capturar la respuesta
-    let responseBody: any = null;
-    const mockRes = {
-      status: (code: number) => ({
-        json: (body: any) => {
-          responseBody = { status: code, body };
-          return mockRes;
-        },
-        end: () => {
-          responseBody = { status: code, body: null };
-          return mockRes;
-        },
-      }),
-      setHeader: () => mockRes,
-    } as unknown as VercelResponse;
-
-    log('Ejecutando handler...');
-    await handleUpdate(mockReq, mockRes);
-    log(`Handler completado: ${JSON.stringify(responseBody)}`);
+    log('Handler completado exitosamente!');
 
     return res.status(200).json({
       success: true,
       logs,
-      response: responseBody,
     });
 
   } catch (error: any) {
