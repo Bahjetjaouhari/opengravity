@@ -178,9 +178,15 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     // Precio para WhatsApp (usar el más relevante)
     const precioParaWhatsApp = getPrecioParaTipo(p);
 
-    // WhatsApp href
+    // URL de la foto principal para WhatsApp
+    const fotoUrl = fotoPrincipal
+      ? `${baseUrl}/api/photos?id=${fotoPrincipal.file_id}`
+      : '';
+
+    // WhatsApp href - incluye enlace a la foto
+    const mensajeWhatsApp = `Hola! Me interesa ${p.tipos.join(' y ')}${precioParaWhatsApp !== 'Sin precio' ? ` (${precioParaWhatsApp})` : ''}. ¿Está disponible?${fotoUrl ? `\n\n📷 Foto: ${fotoUrl}` : ''}`;
     const waHref = whatsappNumber
-      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(`Hola! Me interesa ${p.tipos.join(' y ')}${precioParaWhatsApp !== 'Sin precio' ? ` (${precioParaWhatsApp})` : ''}. ¿Está disponible?`)}`
+      ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(mensajeWhatsApp)}`
       : '#';
 
     // Data de todas las fotos para lightbox
