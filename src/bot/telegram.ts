@@ -387,10 +387,8 @@ bot.command('vaciarbd', async ctx => {
 
 // ── /tienda – Link + QR de la tienda pública ──────────────────────────────
 bot.command('tienda', async ctx => {
-  const vercelUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : 'https://opengravity.vercel.app';
-  const tiendaUrl = `${vercelUrl}/api/tienda`;
+  // Usar URL fija para evitar URLs de deployment que cambian
+  const tiendaUrl = 'https://opengravity-three.vercel.app/api/tienda';
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(tiendaUrl)}&color=7B5FFF&bgcolor=0D0D18&margin=20`;
 
   await ctx.reply(
