@@ -412,8 +412,8 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     }
     .precio-items {
       display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
+      flex-direction: column;
+      gap: 0.15rem;
       font-size: 0.75rem;
       color: var(--text-muted);
     }
