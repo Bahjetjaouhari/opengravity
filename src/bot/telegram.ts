@@ -843,7 +843,7 @@ bot.on('message:text', async (ctx, next) => {
 bot.on('callback_query:data', async ctx => {
   const data = ctx.callbackQuery.data;
   const userId = ctx.from.id;
-  const session = await sessionsDB.get(userId);
+  console.log('[Callback] Data recibida:', data);
 
   // ── Selección de producto para editar (desde /editar) ───────────────────────
   if (data.startsWith('editprod_')) {
@@ -934,7 +934,9 @@ bot.on('callback_query:data', async ctx => {
     return;
   }
 
-  // ── Flujo normal de sesión ──────────────────────────────────────────────────
+  // ── Flujo normal de sesión (para subir fotos) ────────────────────────────────
+  const session = await sessionsDB.get(userId);
+
   if (!session) {
     await ctx.answerCallbackQuery({ text: '⏳ La sesión expiró o ya fue completada.', show_alert: true });
     return;
