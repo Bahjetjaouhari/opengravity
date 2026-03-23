@@ -227,14 +227,38 @@ function parsearPrecios(texto: string, tipos: string[]): {
 
   // Detectamos si el texto tiene precios por tipo
   for (const tipo of tipos) {
-    // Busca "{tipo} {precio}" en cualquier orden con separadores
-    const regex = new RegExp(
+    // Intentar con el tipo exacto primero
+    let regex = new RegExp(
       `${tipo}[^\\d$]*([\\d,.]+\\s*\\$|\\$[\\d,.]+|[\\d,.]+)`,
       'i'
     );
-    const match = texto.match(regex);
+    let match = texto.match(regex);
+
+    // Si no encuentra, intentar con la primera parte del tipo (ej: shortdeplaya → short)
+    if (!match && tipo.length > 4) {
+      const tipoCorto = tipo.replace(/deplaya| playa|deplaya$/i, '').trim();
+      if (tipoCorto && tipoCorto !== tipo) {
+        regex = new RegExp(
+          `${tipoCorto}[^\\d$]*([\\d,.]+\\s*\\$|\\$[\\d,.]+|[\\d,.]+)`,
+          'i'
+        );
+        match = texto.match(regex);
+      }
+    }
+
+    // Si aún no encuentra, buscar cualquier coincidencia parcial
+    if (!match) {
+      // Buscar si hay alguna palabra en el texto que coincida con el inicio del tipo
+      const palabrasTipo = tipo.split(/(?=[A-Z])/).join('|'); // shortdeplaya → short|de|playa
+      regex = new RegExp(
+        `(${palabrasTipo})[^\\d$]*([\\d,.]+\\s*\\$|\\$[\\d,.]+|[\\d,.]+)`,
+        'i'
+      );
+      match = texto.match(regex);
+    }
+
     if (match) {
-      let val = match[1].trim();
+      let val = match[match.length - 1].trim();
       if (!val.includes('$')) val = '$' + val; // normalizar a formato $XX
       precios[tipo.toLowerCase()] = val;
     }
