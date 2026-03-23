@@ -32,13 +32,9 @@ export const env = {
   WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || ''
 };
 
-// Basic Validation - Solo para el bot, no para la tienda
-const isBotEnvironment = typeof process.env.TELEGRAM_BOT_TOKEN !== 'undefined' || process.env.VERCEL !== '1';
-
-if (isBotEnvironment) {
-  if (!env.TELEGRAM_BOT_TOKEN) throw new Error('El TELEGRAM_BOT_TOKEN es necesario. Revisa tu .env.');
-  if (env.TELEGRAM_ALLOWED_USER_IDS.length === 0) throw new Error('TELEGRAM_ALLOWED_USER_IDS no es válido o está vacío.');
-  // DEEPGRAM_API_KEY es opcional - solo se necesita para transcripción de audio
-  if (!env.DEEPGRAM_API_KEY) console.warn('[Config] DEEPGRAM_API_KEY no configurado - transcripción de audio deshabilitada.');
-}
+// Basic Validation
+if (!env.TELEGRAM_BOT_TOKEN) throw new Error('El TELEGRAM_BOT_TOKEN es necesario. Revisa tu .env.');
+if (env.TELEGRAM_ALLOWED_USER_IDS.length === 0) throw new Error('TELEGRAM_ALLOWED_USER_IDS no es válido o está vacío.');
+// DEEPGRAM_API_KEY es opcional - solo se necesita para transcripción de audio
+if (!env.DEEPGRAM_API_KEY) console.warn('[Config] DEEPGRAM_API_KEY no configurado - transcripción de audio deshabilitada.');
 if (!env.WIPE_DB_PIN) console.warn('[Config] WIPE_DB_PIN no configurado - comando /vaciarbd deshabilitado.');
