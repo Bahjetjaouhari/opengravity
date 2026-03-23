@@ -150,7 +150,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
   // Generar datos de productos para lightbox
   const productosData = [...propios, ...pedidos].map(p => {
-    const fotos = inventarioDB.getTodasLasFotos(p);
+    const fotos = getTodasLasFotos(p);
     return fotos.map(f => ({
       id: f.file_id,
       url: `${baseUrl}/api/photos?id=${f.file_id}`
@@ -610,7 +610,15 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
+    console.log('[Tienda API] Iniciando...');
+    console.log('[Tienda API] Firebase config:', {
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      hasApiKey: !!process.env.FIREBASE_API_KEY
+    });
+
     const todos = await obtenerProductos();
+    console.log('[Tienda API] Productos obtenidos:', todos.length);
+
     const propios = todos.filter(p => p.modalidad === 'propio');
     const pedidos = todos.filter(p => p.modalidad === 'pedido');
     const host = req.headers.host || 'opengravity.vercel.app';
@@ -620,7 +628,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=120');
     res.send(html);
   } catch (err: any) {
-    console.error('[Tienda API]', err);
-    res.status(500).send(`<h1>Error cargando la tienda: ${err.message}</h1>`);
+    console.error('[Tienda API] Error:', err);
+    res.status(500).send(`<h1>Error cargando la tienda: ${err.message}</h1><pre>${err.stack}</pre>`);
   }
 }
