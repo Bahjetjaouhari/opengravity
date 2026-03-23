@@ -847,6 +847,7 @@ bot.on('callback_query:data', async ctx => {
 
   // ── Selección de producto para editar (desde /editar) ───────────────────────
   if (data.startsWith('editprod_')) {
+    console.log('[Edit] Seleccionando producto:', data);
     const productoId = data.replace('editprod_', '');
     const producto = await inventarioDB.obtener().then(ps => ps.find(p => p.id === productoId));
     if (!producto) {
@@ -883,6 +884,7 @@ bot.on('callback_query:data', async ctx => {
 
   // ── Selección de campo a editar ────────────────────────────────────────────
   if (data.startsWith('editcampo_')) {
+    console.log('[Edit] Seleccionando campo:', data);
     const [_, productoId, campo] = data.split('_');
     const campoValido = ['tipos', 'precio', 'proveedor', 'modalidad'].includes(campo)
       ? campo as 'tipos' | 'precio' | 'proveedor' | 'modalidad'
@@ -893,6 +895,7 @@ bot.on('callback_query:data', async ctx => {
       return;
     }
 
+    console.log('[Edit] Guardando sesión:', { productoId, campoValido });
     await sessionsDB.set(userId, { productoEditandoId: productoId, campoEditando: campoValido });
 
     let mensaje = '';
