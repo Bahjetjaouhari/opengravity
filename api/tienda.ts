@@ -1,15 +1,104 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { inventarioDB, Producto, FotoProducto } from '../src/inventory/db.js';
+import { initializeApp, getApps } from 'firebase/app';
+import { getFirestore, collection, getDocs, query, where } from 'firebase/firestore';
+
+// Inicializar Firebase directamente (sin usar env.ts que tiene validaciones)
+const firebaseConfig = {
+  apiKey: process.env.FIREBASE_API_KEY || '',
+  authDomain: process.env.FIREBASE_AUTH_DOMAIN || '',
+  projectId: process.env.FIREBASE_PROJECT_ID || '',
+  storageBucket: process.env.FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
+  appId: process.env.FIREBASE_APP_ID || ''
+};
+
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
 export const config = { maxDuration: 30 };
+
+// Tipos locales (sin importar de db.ts para evitar validaciones)
+type Modalidad = 'propio' | 'pedido';
+interface FotoProducto {
+  file_id: string;
+  url: string;
+  orden: number;
+  principal: boolean;
+}
+interface Producto {
+  id?: string;
+  proveedor: string;
+  tipos: string[];
+  nombre: string;
+  precio?: string;
+  precios?: Record<string, string>;
+  precio_total?: string;
+  fotos?: FotoProducto[];
+  foto_url?: string;
+  foto_file_id?: string;
+  disponible: boolean;
+  modalidad: Modalidad;
+  fecha_carga: string;
+}
+
+// Helper functions locales
+function normalizarProducto(data: any): Producto {
+  const producto = { ...data } as Producto;
+  if (!producto.fotos || producto.fotos.length === 0) {
+    if (data.foto_file_id && data.foto_url) {
+      producto.fotos = [{
+        file_id: data.foto_file_id,
+        url: data.foto_url,
+        orden: 0,
+        principal: true
+      }];
+    } else {
+      producto.fotos = [];
+    }
+  }
+  return producto;
+}
+
+function getPrecioParaTipo(producto: Producto, tipo?: string): string {
+  if (tipo && producto.precios?.[tipo.toLowerCase().trim()]) {
+    return producto.precios[tipo.toLowerCase().trim()];
+  }
+  return producto.precio_total || producto.precio || 'Sin precio';
+}
+
+function getTodasLasFotos(producto: Producto): FotoProducto[] {
+  if (producto.fotos && producto.fotos.length > 0) {
+    return [...producto.fotos].sort((a, b) => a.orden - b.orden);
+  }
+  if (producto.foto_file_id && producto.foto_url) {
+    return [{
+      file_id: producto.foto_file_id,
+      url: producto.foto_url,
+      orden: 0,
+      principal: true
+    }];
+  }
+  return [];
+}
+
+async function obtenerProductos(filtros?: { modalidad?: Modalidad }): Promise<Producto[]> {
+  const snapshot = await getDocs(query(collection(db, 'inventario'), where('disponible', '==', true)));
+  let productos: Producto[] = snapshot.docs.map(d => normalizarProducto({ id: d.id, ...d.data() }));
+
+  if (filtros?.modalidad) {
+    productos = productos.filter(p => p.modalidad === filtros.modalidad);
+  }
+
+  return productos;
+}
 
 function buildHTML(propios: Producto[], pedidos: Producto[], host: string): string {
   const baseUrl = `https://${host}`;
   const whatsappNumber = process.env.WHATSAPP_NUMBER || '';
 
   const cardHTML = (p: Producto, index: number) => {
-    const precio = inventarioDB.getPrecioParaTipo(p);
-    const fotos = inventarioDB.getTodasLasFotos(p);
+    const precio = getPrecioParaTipo(p);
+    const fotos = getTodasLasFotos(p);
     const fotoPrincipal = fotos[0];
     const tipos = p.tipos.map(t =>
       `<span class="badge">${t.charAt(0).toUpperCase() + t.slice(1)}</span>`
@@ -521,7 +610,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const todos = await inventarioDB.obtener();
+    const todos = await obtenerProductos();
     const propios = todos.filter(p => p.modalidad === 'propio');
     const pedidos = todos.filter(p => p.modalidad === 'pedido');
     const host = req.headers.host || 'opengravity.vercel.app';
