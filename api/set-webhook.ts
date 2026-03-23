@@ -1,14 +1,10 @@
-import { bot } from "../src/bot/telegram.js";
-
 /**
  * Endpoint para registrar el webhook en Telegram.
  * Llamar una sola vez después de desplegar en Vercel.
  *
  * Uso: GET /api/set-webhook
- *
- * En producción, usa VERCEL_URL (automáticamente seteada por Vercel)
- * o WEBHOOK_URL si necesitas especificar una URL personalizada.
  */
+
 export default async function handler(req: Request) {
   // Verificar que sea un GET request
   if (req.method !== "GET") {
@@ -19,19 +15,30 @@ export default async function handler(req: Request) {
   }
 
   try {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!token) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: "TELEGRAM_BOT_TOKEN no está configurado en Vercel",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Obtener la URL del webhook
-    // VERCEL_URL es seteada automáticamente por Vercel en producción
-    // WEBHOOK_URL puede usarse para override manual
     const vercelUrl = process.env.VERCEL_URL;
     const webhookUrl = process.env.WEBHOOK_URL;
 
     let baseUrl: string;
 
     if (webhookUrl) {
-      // URL manual especificada
       baseUrl = webhookUrl;
     } else if (vercelUrl) {
-      // URL automática de Vercel (ya incluye https://)
       baseUrl = `https://${vercelUrl}`;
     } else {
       return new Response(
@@ -48,19 +55,30 @@ export default async function handler(req: Request) {
 
     const fullWebhookUrl = `${baseUrl}/api/webhook`;
 
-    // Registrar el webhook en Telegram
-    const result = await bot.api.setWebhook(fullWebhookUrl, {
-      allowed_updates: ["message", "edited_message", "callback_query"],
-    });
+    // Llamada directa a la API de Telegram (sin depender del bot)
+    const response = await fetch(
+      `https://api.telegram.org/bot${token}/setWebhook`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: fullWebhookUrl,
+          allowed_updates: ["message", "edited_message", "callback_query"],
+        }),
+      }
+    );
 
-    if (result) {
+    const result = await response.json();
+
+    if (result.ok) {
       return new Response(
         JSON.stringify({
           success: true,
-          message: "Webhook registrado exitosamente",
+          message: "✅ Webhook registrado exitosamente",
           webhook_url: fullWebhookUrl,
+          telegram_response: result,
           instructions:
-            "Tu bot ahora funcionará 24/7. Puedes verificar el estado en /api/webhook-info",
+            "Tu bot ahora funcionará 24/7. Apaga tu PC y prueba enviar un mensaje al bot.",
         }),
         {
           status: 200,
@@ -72,6 +90,7 @@ export default async function handler(req: Request) {
         JSON.stringify({
           success: false,
           error: "Telegram rechazó el registro del webhook",
+          telegram_response: result,
         }),
         {
           status: 500,
