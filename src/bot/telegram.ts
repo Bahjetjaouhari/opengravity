@@ -566,6 +566,7 @@ bot.on('message:text', async (ctx, next) => {
 
     // ── Edición de productos existentes ────────────────────────────────────────
     if (session.productoEditandoId && session.campoEditando) {
+      console.log('[Edit] Procesando edición:', { productoId: session.productoEditandoId, campo: session.campoEditando, texto: text });
       const producto = await inventarioDB.obtener().then(ps => ps.find(p => p.id === session.productoEditandoId));
       if (!producto) {
         await ctx.reply('❌ Producto no encontrado. Usa /editar para comenzar de nuevo.');
@@ -597,6 +598,7 @@ bot.on('message:text', async (ctx, next) => {
         actualizaciones.proveedor = limpiarProveedor(text);
       }
 
+      console.log('[Edit] Actualizando producto:', { id: producto.id, actualizaciones });
       await inventarioDB.actualizar(producto.id!, actualizaciones);
       await sessionsDB.delete(userId);
 
@@ -604,6 +606,7 @@ bot.on('message:text', async (ctx, next) => {
       const precioActualizado = actualizaciones.precio_total || actualizaciones.precio || producto.precio_total || producto.precio;
       const precioFinal = formatearPrecio(precioActualizado);
 
+      console.log('[Edit] Producto actualizado exitosamente');
       await ctx.reply(
         `✅ *Producto actualizado*\n\n` +
         `🏷️ Tipos: ${tiposActualizados.join(' + ')}\n` +
