@@ -1458,10 +1458,10 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
   // ===== TABS =====
   function show(tab) {
-    const tabs = document.querySelectorAll('.tab');
+    var tabs = document.querySelectorAll('.tab');
     document.getElementById('sec-now').classList.remove('visible');
     document.getElementById('sec-order').classList.remove('visible');
-    tabs.forEach(t => { t.className = 'tab'; });
+    tabs.forEach(function(t) { t.className = 'tab'; });
 
     if (tab === 'now') {
       document.getElementById('sec-now').classList.add('visible');
@@ -1474,14 +1474,14 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
   // ===== CATEGORY FILTER =====
   function filterByCategory(category) {
-    document.querySelectorAll('.category-chip').forEach(chip => {
+    document.querySelectorAll('.category-chip').forEach(function(chip) {
       chip.classList.toggle('active', chip.textContent.toLowerCase().includes(category.toLowerCase()) ||
         (category === 'all' && chip.textContent.toLowerCase().includes('todos')));
     });
 
-    const cards = document.querySelectorAll('.card');
-    cards.forEach(card => {
-      const cardCategory = card.getAttribute('data-category') || '';
+    var cards = document.querySelectorAll('.card');
+    cards.forEach(function(card) {
+      var cardCategory = card.getAttribute('data-category') || '';
       if (category === 'all' || cardCategory.includes(category.toLowerCase())) {
         card.style.display = '';
       } else {
@@ -1542,10 +1542,10 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   // ===== CART =====
   function addToCart(productIndex, event) {
     event.stopPropagation();
-    const btn = event.currentTarget;
-    const data = JSON.parse(btn.getAttribute('data-product').replace(/&#39;/g, "'"));
+    var btn = event.currentTarget;
+    var data = JSON.parse(btn.getAttribute('data-product').replace(/&#39;/g, "'"));
 
-    const existingItem = cart.find(item => item.index === productIndex);
+    var existingItem = cart.find(function(item) { return item.index === productIndex; });
     if (existingItem) {
       existingItem.quantity++;
     } else {
@@ -1560,7 +1560,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
     // Visual feedback
     btn.classList.add('added');
-    setTimeout(() => btn.classList.remove('added'), 500);
+    setTimeout(function() { btn.classList.remove('added'); }, 500);
 
     updateCartUI();
     openCart();
@@ -1580,13 +1580,13 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   }
 
   function updateCartUI() {
-    const countEl = document.getElementById('cart-count');
-    const itemsEl = document.getElementById('cart-items');
-    const emptyEl = document.getElementById('cart-empty');
-    const totalEl = document.getElementById('cart-total-count');
-    const checkoutBtn = document.getElementById('btn-checkout');
+    var countEl = document.getElementById('cart-count');
+    var itemsEl = document.getElementById('cart-items');
+    var emptyEl = document.getElementById('cart-empty');
+    var totalEl = document.getElementById('cart-total-count');
+    var checkoutBtn = document.getElementById('btn-checkout');
 
-    const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
+    var totalItems = cart.reduce(function(sum, item) { return sum + item.quantity; }, 0);
 
     countEl.textContent = totalItems;
     countEl.classList.toggle('visible', totalItems > 0);
@@ -1600,9 +1600,9 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       emptyEl.style.display = 'none';
       checkoutBtn.disabled = false;
 
-      itemsEl.innerHTML = cart.map((item, i) =>
-        '<div class="cart-item">' +
-          '<img src="' + item.foto + '" alt="' + item.nombre + '" class="cart-item-img" onerror="this.onerror=null;this.src=\\'https://via.placeholder.com/70x70/1a1a1a/D4AF37?text=BJ\\'">' +
+      itemsEl.innerHTML = cart.map(function(item, i) {
+        return '<div class="cart-item">' +
+          '<img src="' + item.foto + '" alt="' + item.nombre + '" class="cart-item-img" onerror="this.style.display=\'none\'">' +
           '<div class="cart-item-info">' +
             '<div class="cart-item-name">' + item.nombre + '</div>' +
             '<div class="cart-item-price">' + item.precio + '</div>' +
@@ -1618,8 +1618,8 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
               '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1 2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
             '</svg>' +
           '</button>' +
-        '</div>'
-      ).join('');
+        '</div>';
+      }).join('');
 
       itemsEl.appendChild(emptyEl);
     }
