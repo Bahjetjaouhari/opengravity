@@ -259,7 +259,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>BJ Prestige - Tienda Exclusiva</title>
-  <meta name="description" content="Relojeria, accesorios y joyas exclusivas. Calidad premium garantizada." />
+  <meta name="description" content="Moda y estilo que te define. Calidad premium garantizada." />
   <meta name="theme-color" content="#0A0A0A" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
@@ -320,12 +320,25 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       content: '';
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background-image: radial-gradient(ellipse 8px 12px at 20% 30%, rgba(212, 175, 55, 0.03) 0%, transparent 50%),
-                        radial-gradient(ellipse 6px 10px at 80% 20%, rgba(212, 175, 55, 0.02) 0%, transparent 50%),
-                        radial-gradient(ellipse 10px 8px at 40% 70%, rgba(212, 175, 55, 0.02) 0%, transparent 50%),
-                        radial-gradient(ellipse 5px 7px at 70% 80%, rgba(212, 175, 55, 0.03) 0%, transparent 50%);
+      background-image: url('/leopard-bg.jpg');
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      opacity: 0.08;
       pointer-events: none;
       z-index: 0;
+    }
+
+    /* Gold decorative border */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      border: 2px solid transparent;
+      border-image: linear-gradient(135deg, var(--gold) 0%, var(--gold-light) 50%, var(--gold) 100%) 1;
+      pointer-events: none;
+      z-index: 1000;
+      opacity: 0.6;
     }
 
     /* ── HEADER ── */
@@ -1240,7 +1253,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     <img src="/logo-main.jpg" alt="BJ Prestige" class="logo-img" onerror="this.style.display='none'" />
     <div class="brand-text">
       <div class="brand-name">BJ Prestige</div>
-      <div class="brand-tagline">Excelencia en cada detalle</div>
+      <div class="brand-tagline">Moda y estilo que te define</div>
     </div>
   </div>
   <div class="header-actions">
@@ -1273,7 +1286,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
 <section class="hero">
   <h1 class="hero-title">Descubre lo <span>Exclusivo</span></h1>
-  <p class="hero-subtitle">Relojeria, accesorios y joyas de alta calidad. Cada pieza cuenta una historia.</p>
+  <p class="hero-subtitle">Moda y estilo que te define. Calidad premium en cada prenda.</p>
 </section>
 
 <div class="categories">
@@ -1413,7 +1426,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 <footer>
   <div class="footer-brand">BJ Prestige</div>
   <p>Catalogo actualizado en tiempo real</p>
-  <p style="margin-top: 0.5rem; opacity: 0.7;">Excelencia en cada detalle</p>
+  <p style="margin-top: 0.5rem; opacity: 0.7;">Moda y estilo que te define</p>
 </footer>
 
 <script>
