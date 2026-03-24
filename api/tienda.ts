@@ -1511,7 +1511,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     document.getElementById('lightbox-img').src = photo.url;
     document.getElementById('lightbox-counter').textContent =
       productPhotos.length > 1
-        ? \`\${currentPhotoIndex + 1} / \${productPhotos.length}\`
+        ? (currentPhotoIndex + 1) + ' / ' + productPhotos.length
         : '';
 
     document.getElementById('btn-prev').disabled = currentPhotoIndex === 0;
@@ -1595,32 +1595,32 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       emptyEl.style.display = 'none';
       checkoutBtn.disabled = false;
 
-      itemsEl.innerHTML = cart.map((item, i) => \`
-        <div class="cart-item">
-          <img src="\${item.foto}" alt="\${item.nombre}" class="cart-item-img"
-               onerror="this.src='https://via.placeholder.com/70x70/1a1a1a/D4AF37?text=BJ'">
-          <div class="cart-item-info">
-            <div class="cart-item-name">\${item.nombre}</div>
-            <div class="cart-item-price">\${item.precio}</div>
-            <div class="cart-item-qty">
-              <button class="qty-btn" onclick="updateCartQuantity(\${i}, -1)">-</button>
-              <span>\${item.quantity}</span>
-              <button class="qty-btn" onclick="updateCartQuantity(\${i}, 1)">+</button>
-            </div>
-          </div>
-          <button class="cart-item-remove" onclick="removeFromCart(\${i})">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1 2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
-            </svg>
-          </button>
-        </div>
-      \`).join('');
+      itemsEl.innerHTML = cart.map((item, i) =>
+        '<div class="cart-item">' +
+          '<img src="' + item.foto + '" alt="' + item.nombre + '" class="cart-item-img" ' +
+               'onerror="this.src=\'https://via.placeholder.com/70x70/1a1a1a/D4AF37?text=BJ\'">' +
+          '<div class="cart-item-info">' +
+            '<div class="cart-item-name">' + item.nombre + '</div>' +
+            '<div class="cart-item-price">' + item.precio + '</div>' +
+            '<div class="cart-item-qty">' +
+              '<button class="qty-btn" onclick="updateCartQuantity(' + i + ', -1)">-</button>' +
+              '<span>' + item.quantity + '</span>' +
+              '<button class="qty-btn" onclick="updateCartQuantity(' + i + ', 1)">+</button>' +
+            '</div>' +
+          '</div>' +
+          '<button class="cart-item-remove" onclick="removeFromCart(' + i + ')">' +
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+              '<polyline points="3 6 5 6 21 6"></polyline>' +
+              '<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1 2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>' +
+            '</svg>' +
+          '</button>' +
+        '</div>'
+      ).join('');
 
       itemsEl.appendChild(emptyEl);
     }
 
-    totalEl.textContent = \`\${totalItems} item\${totalItems !== 1 ? 's' : ''}\`;
+    totalEl.textContent = totalItems + ' item' + (totalItems !== 1 ? 's' : '');
   }
 
   function openCart() {
@@ -1638,16 +1638,13 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   function checkoutWhatsApp() {
     if (!whatsappNumber || cart.length === 0) return;
 
-    const itemsText = cart.map(item => \`
-- \${item.quantity}x \${item.nombre} (\${item.precio})\`).join('');
+    var itemsText = cart.map(function(item) {
+      return '- ' + item.quantity + 'x ' + item.nombre + ' (' + item.precio + ')';
+    }).join('\\n');
 
-    const message = \`Hola BJ Prestige, me interesa consultar disponibilidad de:
+    var message = 'Hola BJ Prestige, me interesa consultar disponibilidad de:\\n\\n' + itemsText + '\\n\\nGracias!';
 
-\${itemsText}
-
-Gracias!\`;
-
-    const url = \`https://wa.me/\${whatsappNumber}?text=\${encodeURIComponent(message)}\`;
+    var url = 'https://wa.me/' + whatsappNumber + '?text=' + encodeURIComponent(message);
     window.open(url, '_blank');
   }
 
@@ -1698,6 +1695,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.send(html);
   } catch (err: any) {
     console.error('[Tienda API] Error:', err);
-    res.status(500).send(\`<h1>Error cargando la tienda: \${err.message}</h1><pre>\${err.stack}</pre>\`);
+    res.status(500).send(`<h1>Error cargando la tienda: ${err.message}</h1><pre>${err.stack}</pre>`);
   }
 }
