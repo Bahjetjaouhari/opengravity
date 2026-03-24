@@ -255,10 +255,25 @@ export const inventarioDB = {
 
   /**
    * Actualiza campos específicos de un producto.
+   * Los campos con valor null se eliminan del documento.
    */
   actualizar: async (id: string, campos: Partial<Producto>): Promise<void> => {
     const productoRef = doc(db, 'inventario', id);
-    await updateDoc(productoRef, campos);
+
+    // Filtrar valores undefined y convertir null a deleteField
+    const { deleteField } = await import('firebase/firestore');
+    const camposLimpios: Record<string, any> = {};
+
+    for (const [key, value] of Object.entries(campos)) {
+      if (value === undefined) continue; // Ignorar undefined
+      if (value === null) {
+        camposLimpios[key] = deleteField(); // Eliminar campo
+      } else {
+        camposLimpios[key] = value;
+      }
+    }
+
+    await updateDoc(productoRef, camposLimpios);
   },
 
   obtenerAleatorio: async (filtros?: { modalidad?: Modalidad }): Promise<Producto | null> => {

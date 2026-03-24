@@ -575,7 +575,7 @@ bot.on('message:text', async (ctx, next) => {
       }
 
       const campo = session.campoEditando;
-      let actualizaciones: Partial<Producto> = {};
+      const actualizaciones: Partial<Producto> = {};
 
       if (campo === 'tipos') {
         const partes = text.replace(/\s+(y|e)\s+/gi, ',').split(/[,&+]/).map(t => t.trim().toLowerCase()).filter(Boolean);
@@ -584,15 +584,22 @@ bot.on('message:text', async (ctx, next) => {
         actualizaciones.nombre = tipos.join(' + ');
       } else if (campo === 'precio') {
         if (/sin precio/i.test(text)) {
-          actualizaciones.precio = undefined;
-          actualizaciones.precios = undefined;
-          actualizaciones.precio_total = undefined;
+          // Eliminar precios del producto
+          actualizaciones.precio = null as any; // Firebase necesita null, no undefined
+          actualizaciones.precios = null as any;
+          actualizaciones.precio_total = null as any;
         } else {
           const tiposActuales = producto.tipos;
           const parsed = parsearPrecios(text, tiposActuales);
-          actualizaciones.precios = Object.keys(parsed.precios || {}).length > 0 ? parsed.precios : undefined;
-          actualizaciones.precio_total = parsed.precio_total;
-          actualizaciones.precio = parsed.precio;
+          if (Object.keys(parsed.precios || {}).length > 0) {
+            actualizaciones.precios = parsed.precios;
+          }
+          if (parsed.precio_total) {
+            actualizaciones.precio_total = parsed.precio_total;
+          }
+          if (parsed.precio) {
+            actualizaciones.precio = parsed.precio;
+          }
         }
       } else if (campo === 'proveedor') {
         actualizaciones.proveedor = limpiarProveedor(text);
