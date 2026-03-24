@@ -1423,8 +1423,20 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   let currentPhotoIndex = 0;
   let productPhotos = [];
   let cart = [];
-  const allProducts = ${JSON.stringify(productosData)};
-  const whatsappNumber = ${whatsappNumber ? `"${whatsappNumber}"` : 'null'};
+  let allProducts = [];
+  let whatsappNumber = null;
+
+  // Initialize
+  (function() {
+    try {
+      allProducts = ${JSON.stringify(productosData)};
+      whatsappNumber = ${whatsappNumber ? `"${whatsappNumber}"` : 'null'};
+      console.log('[BJ Prestige] Tienda inicializada correctamente');
+      console.log('[BJ Prestige] Productos:', allProducts.length);
+    } catch(e) {
+      console.error('[BJ Prestige] Error:', e);
+    }
+  })();
 
   // ===== THEME =====
   function toggleTheme() {
