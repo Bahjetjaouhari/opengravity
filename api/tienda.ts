@@ -1419,24 +1419,12 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
 <script>
   // ===== STATE =====
-  let currentProductIndex = 0;
-  let currentPhotoIndex = 0;
-  let productPhotos = [];
-  let cart = [];
-  let allProducts = [];
-  let whatsappNumber = null;
-
-  // Initialize
-  (function() {
-    try {
-      allProducts = ${JSON.stringify(productosData)};
-      whatsappNumber = ${whatsappNumber ? `"${whatsappNumber}"` : 'null'};
-      console.log('[BJ Prestige] Tienda inicializada correctamente');
-      console.log('[BJ Prestige] Productos:', allProducts.length);
-    } catch(e) {
-      console.error('[BJ Prestige] Error:', e);
-    }
-  })();
+  var currentProductIndex = 0;
+  var currentPhotoIndex = 0;
+  var productPhotos = [];
+  var cart = [];
+  var allProducts = ${JSON.stringify(productosData)};
+  var whatsappNumber = ${whatsappNumber ? JSON.stringify(whatsappNumber) : 'null'};
 
   // ===== THEME =====
   function toggleTheme() {
@@ -1661,7 +1649,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   }
 
   // ===== KEYBOARD NAVIGATION =====
-  document.addEventListener('keydown', (e) => {
+  document.addEventListener('keydown', function(e) {
     // Close lightbox on Escape
     if (e.key === 'Escape') {
       if (document.getElementById('lightbox').classList.contains('active')) {
