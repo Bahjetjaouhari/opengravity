@@ -1602,8 +1602,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
 
       itemsEl.innerHTML = cart.map((item, i) =>
         '<div class="cart-item">' +
-          '<img src="' + item.foto + '" alt="' + item.nombre + '" class="cart-item-img" ' +
-               'onerror="this.src=\'https://via.placeholder.com/70x70/1a1a1a/D4AF37?text=BJ\'">' +
+          '<img src="' + item.foto + '" alt="' + item.nombre + '" class="cart-item-img" onerror="this.onerror=null;this.src=\\'https://via.placeholder.com/70x70/1a1a1a/D4AF37?text=BJ\\'">' +
           '<div class="cart-item-info">' +
             '<div class="cart-item-name">' + item.nombre + '</div>' +
             '<div class="cart-item-price">' + item.precio + '</div>' +
