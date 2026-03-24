@@ -1423,8 +1423,14 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
   var currentPhotoIndex = 0;
   var productPhotos = [];
   var cart = [];
-  var allProducts = ${JSON.stringify(productosData)};
-  var whatsappNumber = ${whatsappNumber ? JSON.stringify(whatsappNumber) : 'null'};
+  var allProducts = [];
+  var whatsappNumber = null;
+  try {
+    allProducts = ${JSON.stringify(productosData)};
+    whatsappNumber = ${whatsappNumber ? JSON.stringify(whatsappNumber) : 'null'};
+  } catch(e) {
+    console.error('Init error:', e);
+  }
 
   // ===== THEME =====
   function toggleTheme() {
