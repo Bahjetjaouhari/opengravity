@@ -178,7 +178,6 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
       : '#';
 
     const fotosDataAttr = JSON.stringify(fotos.map(f => ({ id: f.file_id, url: `${baseUrl}/api/photos?id=${f.file_id}` })));
-    const fotosDataEscaped = fotosDataAttr.replace(/"/g, '&quot;');
 
     // Etiquetas de producto (simular aleatorio para demo)
     const badgeNuevo = Math.random() > 0.7 ? '<span class="product-badge new">Nuevo</span>' : '';
@@ -187,7 +186,7 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
     return `
     <div class="card" data-product-index="${index}" data-category="${p.tipos.join(',').toLowerCase()}">
       ${badgeNuevo}${badgeBestSeller}
-      <div class="card-img-wrap" onclick="openLightbox(${index}, 0)" data-fotos='${fotosDataEscaped}'>
+      <div class="card-img-wrap" onclick="openLightbox(${index}, 0)" data-fotos="${fotosDataAttr.replace(/"/g, '&quot;')}">
         <img src="${fotoSrc}"
              loading="lazy"
              onerror="this.src='https://via.placeholder.com/400x400/1a1a1a/D4AF37?text=BJ+Prestige'"
@@ -201,12 +200,12 @@ function buildHTML(propios: Producto[], pedidos: Producto[], host: string): stri
         <div class="tipos">${tipos}</div>
         ${precioHTML}
         <div class="card-actions">
-          <button class="btn-add-cart" onclick="addToCart(${index}, event)" data-product='${JSON.stringify({
+          <button class="btn-add-cart" onclick="addToCart(${index}, event)" data-product="${JSON.stringify({
             index,
             nombre: p.tipos.join(' + '),
             precio: precioParaWhatsApp,
             foto: fotoSrc
-          }).replace(/'/g, "&#39;")}'>
+          }).replace(/"/g, '&quot;')}">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="9" cy="21" r="1"></circle>
               <circle cx="20" cy="21" r="1"></circle>
