@@ -1,7 +1,24 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:opengravity-three.vercel.app)"
+      "WebFetch(domain:opengravity-three.vercel.app)",
+      "Bash(gh api:*)",
+      "Bash(cp \"/c/Users/Bahje/OneDrive/Desktop/Opengravity/bjprestige logos/\"*.jpg \"/c/Users/Bahje/OneDrive/Desktop/Opengravity/public/\")",
+      "Bash(cp \"/c/Users/Bahje/OneDrive/Desktop/Opengravity/bjprestige logos/\"*.png \"/c/Users/Bahje/OneDrive/Desktop/Opengravity/public/\")",
+      "Bash(mv 5049050222335560799_121.jpg logo-main.jpg)",
+      "Bash(mv 5049050222335560800_121.jpg logo-wide.jpg)",
+      "Bash(mv \"EJEMPLO DE TIENDA.png\" store-reference.png)",
+      "Bash(cd:*)",
+      "Bash(npx tsc:*)",
+      "Bash(curl -s https://opengravity-three.vercel.app/api/tienda)",
+      "Bash(curl -s \"https://opengravity.vercel.app/api/tienda\")",
+      "Bash(curl -s \"https://opengravity.vercel.app/api/tienda\" -H \"Host: opengravity.vercel.app\")",
+      "Bash(curl -s --max-time 30 \"https://opengravity.vercel.app/api/tienda\")",
+      "Bash(curl -s \"https://opengravity-2pm9s5xfb-bahjetjaouharis-projects.vercel.app/api/tienda\")",
+      "Bash(sed \"1d;$d\")",
+      "Bash(node -e \"try { require\\(''''vm''''\\).createScript\\(require\\(''''fs''''\\).readFileSync\\(''''test-deployed.js'''', ''''utf8''''\\)\\); console.log\\(''''Deployed script parses OK''''\\); } catch\\(e\\) { console.log\\(''''Error:'''', e.message\\); }\")",
+      "Bash(npx vercel:*)",
+      "Bash(curl -s \"https://opengravity-ne7l27m9g-bahjetjaouharis-projects.vercel.app/api/tienda\")"
     ]
   }
 }

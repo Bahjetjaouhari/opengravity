@@ -6,3 +6,5 @@ memory.db-wal
 dist/
 firebase-debug.log
 service-account.json
+
+.vercel
