@@ -1,18 +1,50 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { inventarioDB } from '../src/inventory/db.js';
-import { getMensajeWhatsAppStatus, getMensajeTelegramMarketing, getMensajeSimple } from '../src/marketing/messages.js';
 import { filtrarProductosDisponibles, registrarProductoEnviado } from '../src/marketing/tracking.js';
 
 export const config = { maxDuration: 30 };
 
 /**
+ * Mensajes promocionales para WhatsApp Status
+ */
+function getMensajeWhatsAppPromocional(tipos: string[], precio: string): string {
+  const nombre = tipos.join(' + ');
+  const precioTexto = precio !== 'Sin precio' ? `💰 ${precio}` : '';
+
+  const promociones = [
+    `🔥 ¡OFERTA ESPECIAL! 🔥\n\n${nombre}\n${precioTexto}\n\n✨ Los mejores precios del mercado\n📦 Disponible ahora\n📲 Escríbeme para más info`,
+    `⭐ EXCLUSIVO ⭐\n\n${nombre}\n${precioTexto}\n\n💎 Calidad premium garantizada\n🔥 ¡Pocos disponibles!\n📱 Contáctame YA`,
+    `🎯 ¡NO TE LO PIERDAS! 🎯\n\n${nombre}\n${precioTexto}\n\n💸 Precio especial por tiempo limitado\n🚀 Envío inmediato\n📲 Pide el catálogo completo`,
+    `💥 OFERTÓN 💥\n\n${nombre}\n${precioTexto}\n\n⭐ Mejores marcas, mejores precios\n🎁 Stock disponible\n📱 Escríbeme para comprar`,
+    `🛍️ ¡LO QUIERES, LO TIENES! 🛍️\n\n${nombre}\n${precioTexto}\n\n💎 Producto premium\n🔥 ¡Últimas unidades!\n📲 Contáctame ahora`
+  ];
+
+  return promociones[Math.floor(Math.random() * promociones.length)];
+}
+
+/**
+ * Mensajes promocionales para Instagram
+ */
+function getMensajeInstagramPromocional(tipos: string[], precio: string): string {
+  const nombre = tipos.join(' + ');
+  const precioTexto = precio !== 'Sin precio' ? `💰 REF ${precio}` : '';
+
+  const promociones = [
+    `✨ ${nombre}\n${precioTexto}\n\n🔥 Los mejores precios los encuentras aquí\n💎 Calidad premium garantizada\n📦 Envíos disponibles\n\n📲 Pedidos al DM o WhatsApp`,
+    `⭐ ${nombre}\n${precioTexto}\n\n💼 Atención personalizada\n🚀 Disponibilidad inmediata\n💯 Tu satisfacción garantizada\n\n📱 Escríbeme para tu pedido`,
+    `🎯 ${nombre}\n${precioTexto}\n\n💎 Exclusivo y único\n🔥 Precio especial\n📦 Stock limitado\n\n📲 Contáctame YA`,
+    `💫 ${nombre}\n${precioTexto}\n\n✨ Destaca con estilo\n💎 Calidad superior\n🔥 ¡No te lo pierdas!\n\n📱 Pedidos por DM o WhatsApp`
+  ];
+
+  return promociones[Math.floor(Math.random() * promociones.length)];
+}
+
+/**
  * Cron Job de Marketing para Telegram
- * Envía 2 mensajes diarios a Telegram (12:00 PM):
- * 1. Post para WhatsApp Status (mensaje corto)
- * 2. Post para Instagram (mensaje de marketing)
+ * Envía 1 mensaje diario con texto copiable
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Verificar autenticación (solo Vercel cron puede llamar)
+  // Verificar autenticación
   const authHeader = req.headers.authorization;
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return res.status(401).json({ error: 'No autorizado' });
@@ -20,8 +52,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_OWNER_CHAT_ID;
-  const whatsappNumber = process.env.WHATSAPP_NUMBER || '';
-  const host = req.headers.host || 'opengravity.vercel.app';
 
   if (!token || !chatId) {
     return res.status(500).json({ error: 'Faltan variables de entorno' });
@@ -30,19 +60,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     console.log('[Cron Marketing] Iniciando...');
 
-    // Obtener todos los productos disponibles
+    // Obtener productos disponibles
     const productos = await inventarioDB.obtener();
 
     if (productos.length === 0) {
       return res.json({ ok: true, message: 'No hay productos en el inventario' });
     }
 
-    // Filtrar productos enviados en los últimos 7 días
+    // Filtrar productos enviados
     const productosDisponibles = await filtrarProductosDisponibles(productos);
 
     if (productosDisponibles.length === 0) {
-      // Si todos fueron enviados, usar cualquier producto
-      console.log('[Cron Marketing] Todos los productos fueron enviados recientemente, usando cualquiera');
+      console.log('[Cron Marketing] Todos enviados, usando cualquiera');
       productosDisponibles.push(...productos);
     }
 
@@ -52,119 +81,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Obtener datos del producto
     const fotoPrincipal = inventarioDB.getFotoPrincipal(producto);
     const precio = inventarioDB.getPrecioParaTipo(producto);
-    const nombre = producto.tipos.join(' + ');
     const fotoFileId = fotoPrincipal?.file_id || producto.foto_file_id;
 
-    // URL de la página de compartir
-    const shareUrl = `https://${host}/api/compartir?id=${producto.id}`;
+    // Generar mensajes promocionales
+    const textoWhatsApp = getMensajeWhatsAppPromocional(producto.tipos, precio);
+    const textoInstagram = getMensajeInstagramPromocional(producto.tipos, precio);
 
-    // ========================================
-    // MENSAJE 1: PARA WHATSAPP STATUS
-    // ========================================
-    const mensajeWhatsapp = getMensajeWhatsAppStatus(producto.tipos);
-    const mensajeWhatsappCorto = mensajeWhatsapp.replace(/\n\n📦 Pide el catálogo digital para más modelos 📲/, '');
+    // Mensaje para WhatsApp Status
+    const mensajeWhatsApp =
+      `📱 *TEXTO PARA WHATSAPP STATUS:*\n` +
+      `\`\`\`\n${textoWhatsApp}\n\`\`\`\n\n` +
+      `💡 *Toca el texto para copiar*`;
 
-    // Mensaje para Telegram con formato WhatsApp
-    const mensajeTelegramWhatsapp =
-      `📱 *PARA WHATSAPP STATUS*\n\n` +
-      `${mensajeWhatsappCorto}\n\n` +
-      `──────────────\n` +
-      `👇 Toca el botón para compartir`;
+    // Mensaje para Instagram
+    const mensajeInstagram =
+      `📷 *TEXTO PARA INSTAGRAM:*\n` +
+      `\`\`\`\n${textoInstagram}\n\`\`\`\n\n` +
+      `💡 *Toca el texto para copiar*`;
 
-    // Botones para WhatsApp
-    const keyboardWhatsapp = {
-      inline_keyboard: [
-        [
-          {
-            text: '📤 Compartir en WhatsApp',
-            url: shareUrl
-          }
-        ]
-      ]
-    };
+    console.log('[Cron Marketing] Enviando mensaje 1: WhatsApp Status...');
 
-    console.log('[Cron Marketing] Enviando mensaje 1: WhatsApp Status');
-
-    // Enviar mensaje 1
+    // Enviar mensaje 1: WhatsApp Status
     await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
         photo: fotoFileId,
-        caption: mensajeTelegramWhatsapp,
-        parse_mode: 'Markdown',
-        reply_markup: keyboardWhatsapp
+        caption: mensajeWhatsApp,
+        parse_mode: 'Markdown'
       })
     });
 
-    // ========================================
-    // MENSAJE 2: PARA INSTAGRAM
-    // ========================================
-    const tiendaUrl = `https://${host}/tienda`;
-    const instagramUrl = 'https://instagram.com/BJPRESTIGE_MEN';
-    const mensajeMarketing = getMensajeSimple(producto.tipos);
+    console.log('[Cron Marketing] Enviando mensaje 2: Instagram...');
 
-    // Mensaje para Telegram con formato Instagram
-    const mensajeTelegramInstagram =
-      `📷 *PARA INSTAGRAM HISTORIA*\n\n` +
-      `✨ *${nombre}*\n\n` +
-      `${precio !== 'Sin precio' ? `💰 REF ${precio}\n\n` : ''}` +
-      `${mensajeMarketing}\n\n` +
-      `📦 Pide el catálogo digital para más modelos 📲\n\n` +
-      `──────────────\n` +
-      `👇 Toca el botón para compartir`;
-
-    // Botones para Instagram
-    const keyboardInstagram = {
-      inline_keyboard: [
-        [
-          {
-            text: '📤 Compartir en Instagram',
-            url: shareUrl
-          }
-        ],
-        [
-          {
-            text: '🛒 Ver Tienda',
-            url: tiendaUrl
-          }
-        ]
-      ]
-    };
-
-    console.log('[Cron Marketing] Enviando mensaje 2: Instagram');
-
-    // Enviar mensaje 2
+    // Enviar mensaje 2: Instagram
     await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
         photo: fotoFileId,
-        caption: mensajeTelegramInstagram,
-        parse_mode: 'Markdown',
-        reply_markup: keyboardInstagram
+        caption: mensajeInstagram,
+        parse_mode: 'Markdown'
       })
     });
 
-    // Registrar producto como enviado
+    // Registrar producto enviado
     if (producto.id) {
       await registrarProductoEnviado(
         producto.id,
         'telegram_marketing',
-        `${mensajeWhatsappCorto} | ${mensajeMarketing}`,
+        mensajeWhatsApp,
         producto.tipos
       );
     }
 
-    console.log('[Cron Marketing] Mensajes enviados exitosamente');
+    console.log('[Cron Marketing] Mensaje enviado exitosamente');
 
     return res.json({
       ok: true,
       producto: producto.id,
-      tipo: 'telegram_marketing',
-      mensajes_enviados: 2
+      tipo: 'telegram_marketing'
     });
 
   } catch (err: any) {
