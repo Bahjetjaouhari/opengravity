@@ -5,35 +5,33 @@ import { filtrarProductosDisponibles, registrarProductoEnviado } from '../src/ma
 export const config = { maxDuration: 30 };
 
 /**
- * Mensajes promocionales para WhatsApp Status
+ * Mensajes promocionales para WhatsApp Status (sin precio)
  */
-function getMensajeWhatsAppPromocional(tipos: string[], precio: string): string {
+function getMensajeWhatsAppPromocional(tipos: string[]): string {
   const nombre = tipos.join(' + ');
-  const precioTexto = precio !== 'Sin precio' ? `💰 ${precio}` : '';
 
   const promociones = [
-    `🔥 ¡OFERTA ESPECIAL! 🔥\n\n${nombre}\n${precioTexto}\n\n✨ Los mejores precios del mercado\n📦 Disponible ahora\n📲 Escríbeme para más info`,
-    `⭐ EXCLUSIVO ⭐\n\n${nombre}\n${precioTexto}\n\n💎 Calidad premium garantizada\n🔥 ¡Pocos disponibles!\n📱 Contáctame YA`,
-    `🎯 ¡NO TE LO PIERDAS! 🎯\n\n${nombre}\n${precioTexto}\n\n💸 Precio especial por tiempo limitado\n🚀 Envío inmediato\n📲 Pide el catálogo completo`,
-    `💥 OFERTÓN 💥\n\n${nombre}\n${precioTexto}\n\n⭐ Mejores marcas, mejores precios\n🎁 Stock disponible\n📱 Escríbeme para comprar`,
-    `🛍️ ¡LO QUIERES, LO TIENES! 🛍️\n\n${nombre}\n${precioTexto}\n\n💎 Producto premium\n🔥 ¡Últimas unidades!\n📲 Contáctame ahora`
+    `🔥 ¡OFERTA ESPECIAL! 🔥\n\n${nombre}\n\n✨ Los mejores precios del mercado\n📦 Disponible ahora\n📲 Escríbeme para más info`,
+    `⭐ EXCLUSIVO ⭐\n\n${nombre}\n\n💎 Calidad premium garantizada\n🔥 ¡Pocos disponibles!\n📱 Contáctame YA`,
+    `🎯 ¡NO TE LO PIERDAS! 🎯\n\n${nombre}\n\n💸 Precio especial por tiempo limitado\n🚀 Envío inmediato\n📲 Pide el catálogo completo`,
+    `💥 OFERTÓN 💥\n\n${nombre}\n\n⭐ Mejores marcas, mejores precios\n🎁 Stock disponible\n📱 Escríbeme para comprar`,
+    `🛍️ ¡LO QUIERES, LO TIENES! 🛍️\n\n${nombre}\n\n💎 Producto premium\n🔥 ¡Últimas unidades!\n📲 Contáctame ahora`
   ];
 
   return promociones[Math.floor(Math.random() * promociones.length)];
 }
 
 /**
- * Mensajes promocionales para Instagram
+ * Mensajes promocionales para Instagram (sin precio)
  */
-function getMensajeInstagramPromocional(tipos: string[], precio: string): string {
+function getMensajeInstagramPromocional(tipos: string[]): string {
   const nombre = tipos.join(' + ');
-  const precioTexto = precio !== 'Sin precio' ? `💰 REF ${precio}` : '';
 
   const promociones = [
-    `✨ ${nombre}\n${precioTexto}\n\n🔥 Los mejores precios los encuentras aquí\n💎 Calidad premium garantizada\n📦 Envíos disponibles\n\n📲 Pedidos al DM o WhatsApp`,
-    `⭐ ${nombre}\n${precioTexto}\n\n💼 Atención personalizada\n🚀 Disponibilidad inmediata\n💯 Tu satisfacción garantizada\n\n📱 Escríbeme para tu pedido`,
-    `🎯 ${nombre}\n${precioTexto}\n\n💎 Exclusivo y único\n🔥 Precio especial\n📦 Stock limitado\n\n📲 Contáctame YA`,
-    `💫 ${nombre}\n${precioTexto}\n\n✨ Destaca con estilo\n💎 Calidad superior\n🔥 ¡No te lo pierdas!\n\n📱 Pedidos por DM o WhatsApp`
+    `✨ ${nombre}\n\n🔥 Los mejores precios los encuentras aquí\n💎 Calidad premium garantizada\n📦 Envíos disponibles\n\n📲 Pedidos al DM o WhatsApp`,
+    `⭐ ${nombre}\n\n💼 Atención personalizada\n🚀 Disponibilidad inmediata\n💯 Tu satisfacción garantizada\n\n📱 Escríbeme para tu pedido`,
+    `🎯 ${nombre}\n\n💎 Exclusivo y único\n🔥 Precio especial\n📦 Stock limitado\n\n📲 Contáctame YA`,
+    `💫 ${nombre}\n\n✨ Destaca con estilo\n💎 Calidad superior\n🔥 ¡No te lo pierdas!\n\n📱 Pedidos por DM o WhatsApp`
   ];
 
   return promociones[Math.floor(Math.random() * promociones.length)];
@@ -75,27 +73,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productosDisponibles.push(...productos);
     }
 
-    // Seleccionar producto aleatorio
-    const producto = productosDisponibles[Math.floor(Math.random() * productosDisponibles.length)];
+    // Seleccionar 2 productos aleatorios diferentes
+    const productosParaEnviar = productosDisponibles.length >= 2
+      ? [...productosDisponibles].sort(() => Math.random() - 0.5).slice(0, 2)
+      : productosDisponibles.slice(0, 1);
 
-    // Obtener datos del producto
-    const fotoPrincipal = inventarioDB.getFotoPrincipal(producto);
-    const precio = inventarioDB.getPrecioParaTipo(producto);
-    const fotoFileId = fotoPrincipal?.file_id || producto.foto_file_id;
+    const productoWhatsApp = productosParaEnviar[0];
+    const productoInstagram = productosParaEnviar[1] || productosParaEnviar[0]; // Fallback al mismo si solo hay 1
 
-    // Generar mensajes promocionales
-    const textoWhatsApp = getMensajeWhatsAppPromocional(producto.tipos, precio);
-    const textoInstagram = getMensajeInstagramPromocional(producto.tipos, precio);
+    // Obtener datos del producto para WhatsApp
+    const fotoWhatsApp = inventarioDB.getFotoPrincipal(productoWhatsApp);
+    const precioWhatsApp = inventarioDB.getPrecioParaTipo(productoWhatsApp);
+    const fotoFileIdWhatsApp = fotoWhatsApp?.file_id || productoWhatsApp.foto_file_id;
 
-    // Mensaje para WhatsApp Status
+    // Obtener datos del producto para Instagram
+    const fotoInstagram = inventarioDB.getFotoPrincipal(productoInstagram);
+    const precioInstagram = inventarioDB.getPrecioParaTipo(productoInstagram);
+    const fotoFileIdInstagram = fotoInstagram?.file_id || productoInstagram.foto_file_id;
+
+    // Generar textos promocionales (sin precio)
+    const textoWhatsApp = getMensajeWhatsAppPromocional(productoWhatsApp.tipos);
+    const textoInstagram = getMensajeInstagramPromocional(productoInstagram.tipos);
+
+    // Mensaje para WhatsApp Status (precio fuera del cuadro)
     const mensajeWhatsApp =
       `📱 *TEXTO PARA WHATSAPP STATUS:*\n` +
+      `💰 *Precio: ${precioWhatsApp}*\n\n` +
       `\`\`\`\n${textoWhatsApp}\n\`\`\`\n\n` +
       `💡 *Toca el texto para copiar*`;
 
-    // Mensaje para Instagram
+    // Mensaje para Instagram (precio fuera del cuadro)
     const mensajeInstagram =
       `📷 *TEXTO PARA INSTAGRAM:*\n` +
+      `💰 *Precio: REF ${precioInstagram}*\n\n` +
       `\`\`\`\n${textoInstagram}\n\`\`\`\n\n` +
       `💡 *Toca el texto para copiar*`;
 
@@ -107,7 +117,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        photo: fotoFileId,
+        photo: fotoFileIdWhatsApp,
         caption: mensajeWhatsApp,
         parse_mode: 'Markdown'
       })
@@ -121,27 +131,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
-        photo: fotoFileId,
+        photo: fotoFileIdInstagram,
         caption: mensajeInstagram,
         parse_mode: 'Markdown'
       })
     });
 
-    // Registrar producto enviado
-    if (producto.id) {
+    // Registrar productos enviados
+    if (productoWhatsApp.id) {
       await registrarProductoEnviado(
-        producto.id,
+        productoWhatsApp.id,
         'telegram_marketing',
-        mensajeWhatsApp,
-        producto.tipos
+        textoWhatsApp,
+        productoWhatsApp.tipos
+      );
+    }
+    if (productoInstagram.id && productoInstagram.id !== productoWhatsApp.id) {
+      await registrarProductoEnviado(
+        productoInstagram.id,
+        'telegram_marketing',
+        textoInstagram,
+        productoInstagram.tipos
       );
     }
 
-    console.log('[Cron Marketing] Mensaje enviado exitosamente');
+    console.log('[Cron Marketing] Mensajes enviados exitosamente');
 
     return res.json({
       ok: true,
-      producto: producto.id,
+      productos: [productoWhatsApp.id, productoInstagram.id].filter(Boolean),
       tipo: 'telegram_marketing'
     });
 
