@@ -60,6 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Obtener productos disponibles
     const productos = await inventarioDB.obtener();
+    console.log('[Cron Marketing] Productos obtenidos:', productos.length, productos.map(p => p.id));
 
     if (productos.length === 0) {
       return res.json({ ok: true, message: 'No hay productos en el inventario' });
@@ -67,6 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Filtrar productos enviados
     const productosDisponibles = await filtrarProductosDisponibles(productos);
+    console.log('[Cron Marketing] Productos disponibles después de filtrar:', productosDisponibles.length, productosDisponibles.map(p => p.id));
 
     if (productosDisponibles.length === 0) {
       console.log('[Cron Marketing] Todos enviados, usando cualquiera');
