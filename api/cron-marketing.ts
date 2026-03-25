@@ -55,6 +55,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const nombre = producto.tipos.join(' + ');
     const fotoFileId = fotoPrincipal?.file_id || producto.foto_file_id;
 
+    // URL de la página de compartir
+    const shareUrl = `https://${host}/api/compartir?id=${producto.id}`;
+
     // ========================================
     // MENSAJE 1: PARA WHATSAPP STATUS
     // ========================================
@@ -66,19 +69,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `📱 *PARA WHATSAPP STATUS*\n\n` +
       `${mensajeWhatsappCorto}\n\n` +
       `──────────────\n` +
-      `💡 *Cómo compartir:*\n` +
-      `1. Toca la foto para descargar\n` +
-      `2. Abre WhatsApp\n` +
-      `3. Ve a Estado → Mi estado\n` +
-      `4. Pega el texto y la foto`;
+      `👇 Toca el botón para compartir`;
 
-    // Botones para WhatsApp (link a tu WhatsApp personal)
+    // Botones para WhatsApp
     const keyboardWhatsapp = {
       inline_keyboard: [
         [
           {
-            text: '📋 Copiar Texto',
-            url: `https://opengravity.vercel.app/tienda`
+            text: '📤 Compartir en WhatsApp',
+            url: shareUrl
           }
         ]
       ]
@@ -114,20 +113,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `${mensajeMarketing}\n\n` +
       `📦 Pide el catálogo digital para más modelos 📲\n\n` +
       `──────────────\n` +
-      `💡 *Cómo publicar:*\n` +
-      `1. Toca la foto para descargar\n` +
-      `2. Abre Instagram\n` +
-      `3. Crea una historia\n` +
-      `4. Pega el texto y la foto`;
+      `👇 Toca el botón para compartir`;
 
     // Botones para Instagram
     const keyboardInstagram = {
       inline_keyboard: [
         [
           {
-            text: '📷 Ver Instagram',
-            url: instagramUrl
-          },
+            text: '📤 Compartir en Instagram',
+            url: shareUrl
+          }
+        ],
+        [
           {
             text: '🛒 Ver Tienda',
             url: tiendaUrl
