@@ -29,7 +29,15 @@ export const env = {
   WIPE_DB_PIN: process.env.WIPE_DB_PIN || '',
 
   // WhatsApp para tienda pública (sin el +)
-  WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || ''
+  WHATSAPP_NUMBER: process.env.WHATSAPP_NUMBER || '',
+
+  // Evolution API para WhatsApp Status automation
+  EVOLUTION_API_URL: process.env.EVOLUTION_API_URL || '',
+  EVOLUTION_API_KEY: process.env.EVOLUTION_API_KEY || '',
+  EVOLUTION_INSTANCE: process.env.EVOLUTION_INSTANCE || '',
+
+  // Cron secret para proteger endpoints
+  CRON_SECRET: process.env.CRON_SECRET || ''
 };
 
 // Basic Validation - Updated 2026-03-23 v2
