@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { inventarioDB } from '../src/inventory/db.js';
-import { getMensajeTelegramMarketing } from '../src/marketing/messages.js';
+import { getMensajeWhatsAppStatus, getMensajeTelegramMarketing } from '../src/marketing/messages.js';
 import { filtrarProductosDisponibles, registrarProductoEnviado } from '../src/marketing/tracking.js';
 
 export const config = { maxDuration: 30 };
@@ -8,7 +8,7 @@ export const config = { maxDuration: 30 };
 /**
  * Cron Job de Marketing para Telegram
  * Envía un post de marketing diario a Telegram (12:00 PM)
- * El usuario puede compartirlo en Instagram/Facebook
+ * Con botones para compartir a WhatsApp Status e Instagram
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Verificar autenticación (solo Vercel cron puede llamar)
@@ -19,6 +19,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_OWNER_CHAT_ID;
+  const whatsappNumber = process.env.WHATSAPP_NUMBER || '';
+  const host = req.headers.host || 'opengravity.vercel.app';
 
   if (!token || !chatId) {
     return res.status(500).json({ error: 'Faltan variables de entorno' });
@@ -50,11 +52,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fotoPrincipal = inventarioDB.getFotoPrincipal(producto);
     const precio = inventarioDB.getPrecioParaTipo(producto);
     const nombre = producto.tipos.join(' + ');
+    const fotoUrl = fotoPrincipal?.url || producto.foto_url;
 
-    // Generar mensaje de marketing
-    const mensaje = getMensajeTelegramMarketing(producto.tipos, nombre, precio);
+    // Generar mensajes
+    const mensajeWhatsApp = getMensajeWhatsAppStatus(producto.tipos);
+    const mensajeTelegram = getMensajeTelegramMarketing(producto.tipos, nombre, precio);
+
+    // Crear URL para ver el producto en la tienda
+    const tiendaUrl = `https://${host}/tienda`;
+
+    // Crear URL para compartir a WhatsApp Status
+    // El usuario puede reenviar el mensaje a su estado
+    const mensajeCorto = mensajeWhatsApp.replace(/\n\n📦 Pide el catálogo digital para más modelos 📲/, '');
+    const whatsappShareUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(mensajeCorto)}`;
+
+    // Mensaje para Telegram con instrucciones
+    const mensajeCompleto = `${mensajeTelegram}\n\n──────────────\n📱 *Para compartir:*\n• WhatsApp: Reenvía este mensaje a tu estado\n• Instagram: Copia el texto y pega en tu historia`;
 
     console.log('[Cron Marketing] Enviando producto:', producto.id);
+
+    // Crear botones inline
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          {
+            text: '📱 Compartir a WhatsApp',
+            url: whatsappShareUrl
+          },
+          {
+            text: '🛒 Ver en Tienda',
+            url: tiendaUrl
+          }
+        ]
+      ]
+    };
 
     // Enviar a Telegram
     const telegramResponse = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
@@ -63,8 +94,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: JSON.stringify({
         chat_id: chatId,
         photo: fotoPrincipal?.file_id || producto.foto_file_id,
-        caption: mensaje,
-        parse_mode: 'Markdown'
+        caption: mensajeCompleto,
+        parse_mode: 'Markdown',
+        reply_markup: inlineKeyboard
       })
     });
 
@@ -79,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await registrarProductoEnviado(
         producto.id,
         'telegram_marketing',
-        mensaje,
+        mensajeTelegram,
         producto.tipos
       );
     }
@@ -89,7 +121,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({
       ok: true,
       producto: producto.id,
-      tipo: 'telegram_marketing'
+      tipo: 'telegram_marketing',
+      mensaje_whatsapp: mensajeWhatsApp
     });
 
   } catch (err: any) {
