@@ -61,23 +61,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const mensajeWhatsapp = getMensajeWhatsAppStatus(producto.tipos);
     const mensajeWhatsappCorto = mensajeWhatsapp.replace(/\n\n📦 Pide el catálogo digital para más modelos 📲/, '');
 
-    // Crear URL para compartir a WhatsApp
-    const whatsappShareUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(mensajeWhatsappCorto)}`;
-
     // Mensaje para Telegram con formato WhatsApp
     const mensajeTelegramWhatsapp =
       `📱 *PARA WHATSAPP STATUS*\n\n` +
       `${mensajeWhatsappCorto}\n\n` +
       `──────────────\n` +
-      `💡 Reenvía este mensaje a tu estado de WhatsApp`;
+      `💡 *Cómo compartir:*\n` +
+      `1. Toca la foto para descargar\n` +
+      `2. Abre WhatsApp\n` +
+      `3. Ve a Estado → Mi estado\n` +
+      `4. Pega el texto y la foto`;
 
-    // Botones para WhatsApp
+    // Botones para WhatsApp (link a tu WhatsApp personal)
     const keyboardWhatsapp = {
       inline_keyboard: [
         [
           {
-            text: '📱 Abrir WhatsApp',
-            url: whatsappShareUrl
+            text: '📋 Copiar Texto',
+            url: `https://opengravity.vercel.app/tienda`
           }
         ]
       ]
@@ -102,6 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // MENSAJE 2: PARA INSTAGRAM
     // ========================================
     const tiendaUrl = `https://${host}/tienda`;
+    const instagramUrl = 'https://instagram.com/BJPRESTIGE_MEN';
     const mensajeMarketing = getMensajeSimple(producto.tipos);
 
     // Mensaje para Telegram con formato Instagram
@@ -112,14 +114,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `${mensajeMarketing}\n\n` +
       `📦 Pide el catálogo digital para más modelos 📲\n\n` +
       `──────────────\n` +
-      `💡 Copia el texto y pega en tu historia de Instagram`;
+      `💡 *Cómo publicar:*\n` +
+      `1. Toca la foto para descargar\n` +
+      `2. Abre Instagram\n` +
+      `3. Crea una historia\n` +
+      `4. Pega el texto y la foto`;
 
     // Botones para Instagram
     const keyboardInstagram = {
       inline_keyboard: [
         [
           {
-            text: '🛒 Ver en Tienda',
+            text: '📷 Ver Instagram',
+            url: instagramUrl
+          },
+          {
+            text: '🛒 Ver Tienda',
             url: tiendaUrl
           }
         ]
