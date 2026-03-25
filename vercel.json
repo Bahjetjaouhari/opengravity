@@ -7,10 +7,6 @@
     {
       "path": "/api/cron-marketing",
       "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/cron-status",
-      "schedule": "0 9,18 * * *"
     }
   ],
   "rewrites": [
